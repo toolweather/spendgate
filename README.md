@@ -46,7 +46,10 @@ Hard overrides, applied after the raw score:
 | --- | --- | --- |
 | Anonymous | 100 scores / UTC day | No key |
 | Free key | 1,000 scores / UTC day | `POST /v1/keys` |
+| Toolweather bundle | 1,000 scores / UTC day per client | Matching `x-tw-bundle-secret` plus `x-tw-bundle-client` |
 | Overage | $0.001 USDC per score | x402 on Base after the cap |
+
+The Toolweather Worker proxies `score_spend`, `get_quota`, and `spendgate_get_api_key` to this server. When it sends `x-tw-bundle-secret` equal to this Worker's `BUNDLE_PROXY_SECRET`, the free-key daily cap is charged to `x-tw-bundle-client` (16–128 hex characters, or Toolweather's `anon:` plus that hash; a longer value uses a stable 128-character prefix). The raw client id is not stored. A presented `sg_live_…` key still wins. A missing, unset, or wrong secret keeps the anonymous IP bucket and does not return an error just because the headers are absent. Key minting through the proxy uses the same client id for the daily mint cap.
 
 - Network `eip155:8453` (Base mainnet).
 - Asset USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` (EIP-712 name `USD Coin`, version `2`).
@@ -148,8 +151,11 @@ npx wrangler d1 create spendgate
 # Put the returned database_id in wrangler.toml (the committed id is a placeholder).
 npx wrangler d1 migrations apply spendgate --remote
 npx wrangler secret put PAY_TO
+npx wrangler secret put BUNDLE_PROXY_SECRET
 npx wrangler deploy
 ```
+
+`BUNDLE_PROXY_SECRET` must be the same value as on the Toolweather Worker. Set it after merge, then redeploy. Do not commit the value. Until that secret is set, proxied calls without an `sg_live_…` key keep sharing the anonymous daily bucket.
 
 `npm run dry-run` bundles the Worker the way a deploy would, without publishing.
 

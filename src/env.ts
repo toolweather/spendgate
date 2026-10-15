@@ -13,6 +13,11 @@ export interface Env {
   KEY_DAILY_LIMIT?: string;
   KEYS_PER_DAY?: string;
   MICRO_THRESHOLD_USD?: string;
+  /**
+   * Shared secret with the Toolweather Worker. Set with
+   * `npx wrangler secret put BUNDLE_PROXY_SECRET`. Never commit the value.
+   */
+  BUNDLE_PROXY_SECRET?: string;
 }
 
 export interface Config {
@@ -29,6 +34,8 @@ export interface Config {
   keysPerDay: number;
   microThresholdUsd: number;
   maxTimeoutSeconds: number;
+  /** Null when the Worker secret is unset. Headers are ignored in that case. */
+  bundleProxySecret: string | null;
 }
 
 const USDC_DECIMALS = 6;
@@ -72,6 +79,7 @@ export function readConfig(env: Env): Config {
     keysPerDay: intEnv(env.KEYS_PER_DAY, 20),
     microThresholdUsd: numEnv(env.MICRO_THRESHOLD_USD, 1),
     maxTimeoutSeconds: 60,
+    bundleProxySecret: (env.BUNDLE_PROXY_SECRET ?? "").trim() || null,
   };
 }
 

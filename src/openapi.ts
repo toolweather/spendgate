@@ -38,7 +38,23 @@ export function openApiDocument(origin: string, config: Config) {
               in: "header",
               required: false,
               schema: { type: "string" },
-              description: "Bearer sg_live_… free key. Omit for the anonymous cap.",
+              description: "Bearer sg_live_… free key. Omit for the anonymous cap. Wins over bundle proxy headers.",
+            },
+            {
+              name: "X-Tw-Bundle-Secret",
+              in: "header",
+              required: false,
+              schema: { type: "string" },
+              description:
+                "Toolweather suite proxy secret. When it matches BUNDLE_PROXY_SECRET, free quota is charged to X-Tw-Bundle-Client. A missing or wrong value keeps anonymous or API-key behavior.",
+            },
+            {
+              name: "X-Tw-Bundle-Client",
+              in: "header",
+              required: false,
+              schema: { type: "string" },
+              description:
+                "Client id for bundle quota. 16–128 hex characters, or anon: plus that hash. Longer values use a stable prefix. Ignored unless X-Tw-Bundle-Secret matches.",
             },
             {
               name: "PAYMENT-SIGNATURE",

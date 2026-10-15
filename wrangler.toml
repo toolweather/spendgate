@@ -37,3 +37,7 @@ MICRO_THRESHOLD_USD = "1"
 # PAY_TO is intentionally not set here. Put the receiving wallet in a secret
 # or in .dev.vars locally. Do not commit a real address.
 #   npx wrangler secret put PAY_TO
+#
+# Toolweather suite proxy. Same value as the Toolweather Worker's
+# BUNDLE_PROXY_SECRET. Do not commit it.
+#   npx wrangler secret put BUNDLE_PROXY_SECRET

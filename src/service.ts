@@ -16,10 +16,10 @@ import {
 } from "./x402.js";
 
 export interface QuotaView {
-  subject: "anonymous" | "api_key";
+  subject: "anonymous" | "api_key" | "bundle";
   key_id: string | null;
   key_prefix: string | null;
-  tier: "anonymous" | "free";
+  tier: "anonymous" | "free" | "bundle";
   daily_limit: number;
   used_today: number;
   remaining_today: number;
@@ -101,10 +101,10 @@ async function quotaFor(
 ): Promise<QuotaView> {
   const usage = await store.getUsage(auth.subject, dayOf(now));
   return {
-    subject: auth.key ? "api_key" : "anonymous",
+    subject: auth.plan,
     key_id: auth.key?.id ?? null,
     key_prefix: auth.key?.keyPrefix ?? null,
-    tier: auth.key ? "free" : "anonymous",
+    tier: auth.plan === "api_key" ? "free" : auth.plan,
     daily_limit: auth.limit,
     used_today: usage.scoreCount,
     remaining_today: Math.max(0, auth.limit - usage.scoreCount),
@@ -160,6 +160,47 @@ interface AuthContext {
   limit: number;
   key: StoredKey | null;
   ownerHint: string;
+  plan: "anonymous" | "api_key" | "bundle";
+}
+
+/**
+ * Upstream accepts 16–128 hex chars. Toolweather also sends `anon:` plus that
+ * hash for callers with no Toolweather key. A longer value keeps a stable prefix.
+ */
+export function bundleClientId(raw: string | null | undefined): string | null {
+  if (!raw) return null;
+  const trimmed = raw.trim().toLowerCase();
+  if (/^[a-f0-9]{16,128}$/.test(trimmed)) return trimmed;
+  if (/^anon:[a-f0-9]{16,128}$/.test(trimmed)) return trimmed;
+  if (/^[a-f0-9]{129,}$/.test(trimmed)) return trimmed.slice(0, 128);
+  const anonLong = /^anon:([a-f0-9]{129,})$/.exec(trimmed);
+  if (anonLong?.[1]) return `anon:${anonLong[1].slice(0, 128)}`;
+  return null;
+}
+
+function secretsEqual(expected: string, presented: string): boolean {
+  if (expected.length !== presented.length) return false;
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) {
+    diff |= expected.charCodeAt(i) ^ presented.charCodeAt(i);
+  }
+  return diff === 0;
+}
+
+async function bundleIdentity(
+  config: Config,
+  day: string,
+  bundleSecret: string | null | undefined,
+  bundleClient: string | null | undefined,
+): Promise<{ subject: string; ownerHint: string } | null> {
+  const expected = config.bundleProxySecret;
+  if (!expected || !bundleSecret || !secretsEqual(expected, bundleSecret)) return null;
+  const clientId = bundleClientId(bundleClient);
+  if (!clientId) return null;
+  return {
+    subject: `bundle:${await sha256Hex(`spendgate-bundle-v1:${day}:${clientId}`)}`,
+    ownerHint: await sha256Hex(`spendgate-owner-v1:${day}:bundle:${clientId}`),
+  };
 }
 
 function bearerToken(authorization: string | null): string | null {
@@ -179,16 +220,31 @@ export async function resolveAuth(args: {
   apiKeyArgument?: string | null;
   ip: string | null;
   now: Date;
+  bundleSecret?: string | null;
+  bundleClient?: string | null;
 }): Promise<{ ok: true; auth: AuthContext } | { ok: false; outcome: ServiceOutcome }> {
   const day = dayOf(args.now);
   const hint = await ownerHint(args.ip, day);
   const headerKey = bearerToken(args.authorization);
   const presented = headerKey || args.apiKeyArgument?.trim() || null;
   if (!presented) {
+    const bundled = await bundleIdentity(args.config, day, args.bundleSecret, args.bundleClient);
+    if (bundled) {
+      return {
+        ok: true,
+        auth: {
+          subject: bundled.subject,
+          limit: args.config.keyDailyLimit,
+          key: null,
+          ownerHint: bundled.ownerHint,
+          plan: "bundle",
+        },
+      };
+    }
     const subject = `anon:${await sha256Hex(`spendgate-anon-v1:${day}:${args.ip ?? "unknown"}`)}`;
     return {
       ok: true,
-      auth: { subject, limit: args.config.anonDailyLimit, key: null, ownerHint: hint },
+      auth: { subject, limit: args.config.anonDailyLimit, key: null, ownerHint: hint, plan: "anonymous" },
     };
   }
   if (!presented.startsWith("sg_live_")) {
@@ -214,7 +270,7 @@ export async function resolveAuth(args: {
   }
   return {
     ok: true,
-    auth: { subject: `key:${key.id}`, limit: key.dailyLimit, key, ownerHint: hint },
+    auth: { subject: `key:${key.id}`, limit: key.dailyLimit, key, ownerHint: hint, plan: "api_key" },
   };
 }
 
@@ -233,6 +289,8 @@ export async function readQuota(args: {
   apiKeyArgument?: string | null;
   ip: string | null;
   now: Date;
+  bundleSecret?: string | null;
+  bundleClient?: string | null;
 }): Promise<ServiceOutcome> {
   const auth = await resolveAuth(args);
   if (!auth.ok) return auth.outcome;
@@ -247,9 +305,12 @@ export async function mintKey(args: {
   now: Date;
   label: string | null;
   ids?: () => string;
+  bundleSecret?: string | null;
+  bundleClient?: string | null;
 }): Promise<ServiceOutcome> {
   const day = dayOf(args.now);
-  const hint = await ownerHint(args.ip, day);
+  const bundled = await bundleIdentity(args.config, day, args.bundleSecret, args.bundleClient);
+  const hint = bundled?.ownerHint ?? (await ownerHint(args.ip, day));
   const since = `${day}T00:00:00.000Z`;
   const minted = await args.store.countKeysSince(hint, since);
   if (minted >= args.config.keysPerDay) {
@@ -302,6 +363,8 @@ export async function scoreRequest(args: {
   ip: string | null;
   authorization: string | null;
   apiKeyArgument?: string | null;
+  bundleSecret?: string | null;
+  bundleClient?: string | null;
   body: unknown;
   resourceUrl: string;
   paymentHeader: string | null;

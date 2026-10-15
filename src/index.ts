@@ -29,6 +29,13 @@ function clientIp(request: Request): string | null {
   );
 }
 
+function bundleFrom(header: (name: string) => string | undefined): { bundleSecret: string | null; bundleClient: string | null } {
+  return {
+    bundleSecret: header("x-tw-bundle-secret") ?? null,
+    bundleClient: header("x-tw-bundle-client") ?? null,
+  };
+}
+
 async function readBody(request: Request): Promise<{ ok: true; value: unknown } | { ok: false; message: string }> {
   const length = Number(request.headers.get("content-length") ?? "0");
   if (length > 16_384) return { ok: false, message: "Request body is limited to 16 KB." };
@@ -64,6 +71,8 @@ export function createApp(options: AppOptions = {}) {
         "MCP-Protocol-Version",
         "Mcp-Session-Id",
         "Idempotency-Key",
+        "X-Tw-Bundle-Secret",
+        "X-Tw-Bundle-Client",
       ],
       exposeHeaders: [
         "PAYMENT-REQUIRED",
@@ -183,6 +192,7 @@ export function createApp(options: AppOptions = {}) {
       authorization: c.req.header("authorization") ?? null,
       ip: clientIp(c.req.raw),
       now: options.now?.() ?? new Date(),
+      ...bundleFrom((name) => c.req.header(name)),
     });
     return send(c, outcome);
   });
@@ -209,6 +219,7 @@ export function createApp(options: AppOptions = {}) {
       now: options.now?.() ?? new Date(),
       label,
       ids: options.ids,
+      ...bundleFrom((name) => c.req.header(name)),
     });
     return send(c, outcome);
   });
@@ -227,6 +238,7 @@ export function createApp(options: AppOptions = {}) {
       now: options.now?.() ?? new Date(),
       ip: clientIp(c.req.raw),
       authorization: c.req.header("authorization") ?? null,
+      ...bundleFrom((name) => c.req.header(name)),
       body: body.value,
       resourceUrl: `${originOf(c.req.url)}/v1/score`,
       paymentHeader: c.req.header("payment-signature") ?? c.req.header("x-payment") ?? null,
@@ -268,6 +280,7 @@ export function createApp(options: AppOptions = {}) {
     const now = options.now?.() ?? new Date();
     const ip = clientIp(c.req.raw);
     const authorization = c.req.header("authorization") ?? null;
+    const bundle = bundleFrom((name) => c.req.header(name));
     const paymentHeader = c.req.header("payment-signature") ?? c.req.header("x-payment") ?? null;
     const idempotencyKey = c.req.header("idempotency-key") ?? null;
     const resourceUrl = `${originOf(c.req.url)}/v1/score`;
@@ -287,6 +300,7 @@ export function createApp(options: AppOptions = {}) {
           ip,
           authorization,
           apiKeyArgument: typeof args.api_key === "string" ? args.api_key : null,
+          ...bundle,
           body: args,
           resourceUrl,
           paymentHeader,
@@ -302,6 +316,7 @@ export function createApp(options: AppOptions = {}) {
           config,
           authorization,
           apiKeyArgument: typeof args.api_key === "string" ? args.api_key : null,
+          ...bundle,
           ip,
           now,
         });
@@ -310,7 +325,7 @@ export function createApp(options: AppOptions = {}) {
         const ready = requireStore();
         if (!("getUsage" in ready)) return ready;
         const label = typeof args.label === "string" ? args.label.replace(/[\u0000-\u001f]/g, "").trim().slice(0, 80) || null : null;
-        return mintKey({ store: ready, config, ip, now, label, ids: options.ids });
+        return mintKey({ store: ready, config, ip, now, label, ids: options.ids, ...bundle });
       },
     });
 
