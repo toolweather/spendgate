@@ -1,5 +1,7 @@
 # SpendGate
 
+[![Toolweather](https://toolweather.toolweather.workers.dev/badge/io.github.toolweather/spendgate.svg)](https://toolweather.pages.dev/servers/io.github.toolweather--spendgate/)
+
 [![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/toolweather/spendgate)
 
 SpendGate helps an autonomous agent decide whether to approve a planned spend **before** it pays.
