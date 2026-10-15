@@ -33,7 +33,7 @@ describe("lookupPaycheck", () => {
     };
     const config = readConfig(testEnv({ BUNDLE_PROXY_SECRET: "suite-secret", PAYCHECK_API_KEY: "" }));
     const verdict = await lookupPaycheck(fetchImpl, config, "https://api.perplexity.ai");
-    expect(verdict).toBe("trusted");
+    expect(verdict).toEqual({ verdict: "trusted", error: null });
     expect(seen).toHaveLength(1);
     expect(seen[0]?.url).toBe("https://paycheck.toolweather.workers.dev/v1/check");
     const headers = new Headers(seen[0]?.init?.headers);
@@ -53,7 +53,7 @@ describe("lookupPaycheck", () => {
       return Response.json({ verdict: "suspicious" });
     };
     const config = readConfig(testEnv({ BUNDLE_PROXY_SECRET: "suite-secret", PAYCHECK_API_KEY: "pc_live_test" }));
-    expect(await lookupPaycheck(fetchImpl, config, "pay.example.com")).toBe("suspicious");
+    expect(await lookupPaycheck(fetchImpl, config, "pay.example.com")).toEqual({ verdict: "suspicious", error: null });
   });
 
   it("stays anonymous when no secret is configured", async () => {
@@ -66,7 +66,7 @@ describe("lookupPaycheck", () => {
     const config = readConfig(testEnv());
     expect(config.paycheckUrl).toBe("https://paycheck.toolweather.workers.dev");
     expect(config.paycheckApiKey).toBeNull();
-    expect(await lookupPaycheck(fetchImpl, config, "pay.example.com")).toBe("unknown");
+    expect(await lookupPaycheck(fetchImpl, config, "pay.example.com")).toEqual({ verdict: "unknown", error: null });
   });
 
   it("fails open on a non-OK response, a bad body, or a thrown fetch", async () => {
@@ -76,8 +76,35 @@ describe("lookupPaycheck", () => {
     const boom: typeof fetch = async () => {
       throw new Error("paycheck down");
     };
-    expect(await lookupPaycheck(down, config, "https://pay.example.com")).toBeNull();
-    expect(await lookupPaycheck(junk, config, "https://pay.example.com")).toBeNull();
-    expect(await lookupPaycheck(boom, config, "https://pay.example.com")).toBeNull();
+    expect(await lookupPaycheck(down, config, "https://pay.example.com")).toEqual({
+      verdict: null,
+      error: "http_status:503",
+    });
+    expect(await lookupPaycheck(junk, config, "https://pay.example.com")).toEqual({ verdict: null, error: "parse" });
+    expect(await lookupPaycheck(boom, config, "https://pay.example.com")).toEqual({ verdict: null, error: "network" });
+  });
+
+  it("prefers the service binding and does not call the public fetch", async () => {
+    let publicCalls = 0;
+    const fetchImpl: typeof fetch = async () => {
+      publicCalls += 1;
+      throw new Error("public fetch");
+    };
+    let seen: Request | null = null;
+    const binding = {
+      fetch: async (input: RequestInfo | URL) => {
+        seen = input instanceof Request ? input : new Request(input);
+        return Response.json({ verdict: "suspicious", score: 40 });
+      },
+    } as Fetcher;
+    const config = readConfig(testEnv({ BUNDLE_PROXY_SECRET: "suite-secret" }));
+    const lookup = await lookupPaycheck(fetchImpl, config, "https://qz7k-pay-now-claim.biz", binding);
+    expect(lookup).toEqual({ verdict: "suspicious", error: null });
+    expect(publicCalls).toBe(0);
+    expect(seen).toBeInstanceOf(Request);
+    expect(new URL(seen!.url).pathname).toBe("/v1/check");
+    expect(await seen!.json()).toEqual({ target: "https://qz7k-pay-now-claim.biz" });
+    expect(seen!.headers.get("x-tw-bundle-client")).toBe(SPENDGATE_PAYCHECK_CLIENT);
+    expect(seen!.method).toBe("POST");
   });
 });

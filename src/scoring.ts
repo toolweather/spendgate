@@ -575,8 +575,10 @@ export function policyDocument(microThresholdUsd: number, paycheckUrl = DEFAULT_
       timeout_ms: PAYCHECK_TIMEOUT_MS,
       local_allowlist:
         "A public https host on known_host_suffixes (no userinfo, port 443 or default) is known with no network call, including when PayCheck is down.",
+      transport:
+        "Service binding PAYCHECK (worker paycheck) when it is present. Otherwise HTTPS POST to url. A public workers.dev fetch from this Worker fails on the same account, so production uses the binding.",
       on_failure:
-        "Unreachable, timed out, or non-OK PayCheck responses use local classifyMerchant. score_spend still returns.",
+        "Unreachable, timed out, or non-OK PayCheck responses use local classifyMerchant. score_spend still returns. detail.paycheck_error is timeout, http_status:<code>, parse, or network.",
       caller_billing:
         "The lookup is SpendGate's internal call. It does not use the caller's sg_live_ key or x-tw-bundle-client, and it is not a second x402 charge on the score.",
       attribution: {

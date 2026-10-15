@@ -42,7 +42,7 @@ Hard overrides, applied after the raw score:
 
 ### PayCheck
 
-When the merchant is a domain, an http(s) URL, or a `0x` wallet, and it is not already a public https host on the local known-host list, SpendGate calls [PayCheck](https://paycheck.toolweather.workers.dev) `POST /v1/check` with `{ "target": "..." }`.
+When the merchant is a domain, an http(s) URL, or a `0x` wallet, and it is not already a public https host on the local known-host list, SpendGate calls [PayCheck](https://paycheck.toolweather.workers.dev) `POST /v1/check` with `{ "target": "..." }`. The deployed Worker uses the `PAYCHECK` service binding (`service = "paycheck"`). A public `*.workers.dev` fetch from another worker on the same account fails, so that URL is only the fallback for tests and for a process with no binding.
 
 | PayCheck verdict | SpendGate |
 | --- | --- |
@@ -51,7 +51,7 @@ When the merchant is a domain, an http(s) URL, or a `0x` wallet, and it is not a
 | `suspicious` | Merchant penalty 30 (plus 12 if the URL is insecure). Not known. |
 | `block` | Merchant penalty 42 (plus 12 if insecure). Verdict `block`, published score at most 24, including under the $1 micro threshold. |
 
-`openai.com` and the other `KNOWN_HOST_SUFFIXES` stay known with no network call, so a PayCheck outage does not change them. Any other PayCheck failure (timeout, non-OK, bad JSON) falls back to the local merchant rules and `score_spend` still returns a score. A raw IP or `http` URL keeps the insecure penalty on that fallback.
+`openai.com` and the other `KNOWN_HOST_SUFFIXES` stay known with no network call, so a PayCheck outage does not change them. Any other PayCheck failure (timeout, non-OK, bad JSON) falls back to the local merchant rules and `score_spend` still returns a score. `detail.paycheck_error` is `timeout`, `http_status:<code>`, `parse`, or `network` on that fallback, and the Worker logs `paycheck lookup failed: …`. A raw IP or `http` URL keeps the insecure penalty on that fallback.
 
 The lookup is SpendGate's internal call, not a second charge to the caller. It does not forward the caller's `sg_live_` key or `x-tw-bundle-client`. Auth, in order: optional `PAYCHECK_API_KEY`; else `BUNDLE_PROXY_SECRET` with SpendGate's own bundle client `7370656e6467617465` (hex for `spendgate`, 1,000 PayCheck checks per UTC day); else PayCheck's anonymous free tier (100 per UTC day). No new secret is required. `PAYCHECK_URL` defaults to `https://paycheck.toolweather.workers.dev`.
 

@@ -69,34 +69,61 @@ function paycheckHeaders(config: Config): Record<string, string> {
   return headers;
 }
 
+export interface PaycheckLookup {
+  verdict: PaycheckVerdict | null;
+  /**
+   * Why the verdict is missing after a lookup was attempted.
+   * `timeout`, `http_status:<code>`, `parse`, or `network`.
+   * Null when the call succeeded. Not set when the allowlist skipped the call.
+   */
+  error: string | null;
+}
+
+function lookupError(error: unknown): string {
+  if (error instanceof DOMException && (error.name === "TimeoutError" || error.name === "AbortError")) {
+    return "timeout";
+  }
+  if (error instanceof Error && (error.name === "TimeoutError" || error.name === "AbortError")) return "timeout";
+  if (error instanceof SyntaxError) return "parse";
+  return "network";
+}
+
+function failed(error: string): PaycheckLookup {
+  console.warn(`paycheck lookup failed: ${error}`);
+  return { verdict: null, error };
+}
+
 /**
- * Live PayCheck verdict, or null when the call cannot be trusted.
- * Null means the caller should keep local classifyMerchant (fail open).
+ * Live PayCheck verdict. A null verdict means keep local classifyMerchant (fail open).
+ * A service binding is preferred: public `*.workers.dev` fetches between workers
+ * on the same account fail. Without a binding, `fetchImpl` posts to PAYCHECK_URL.
  * Auth is SpendGate's own key, bundle client, or anonymous — never the end user.
  */
 export async function lookupPaycheck(
   fetchImpl: typeof fetch,
   config: Config,
   target: string,
-): Promise<PaycheckVerdict | null> {
+  binding?: Fetcher,
+): Promise<PaycheckLookup> {
   const url = `${config.paycheckUrl.replace(/\/$/, "")}/v1/check`;
+  const init: RequestInit = {
+    method: "POST",
+    headers: paycheckHeaders(config),
+    body: JSON.stringify({ target }),
+    signal: AbortSignal.timeout(PAYCHECK_TIMEOUT_MS),
+  };
   try {
-    const response = await fetchImpl(url, {
-      method: "POST",
-      headers: paycheckHeaders(config),
-      body: JSON.stringify({ target }),
-      signal: AbortSignal.timeout(PAYCHECK_TIMEOUT_MS),
-    });
+    const response = binding ? await binding.fetch(new Request(url, init)) : await fetchImpl(url, init);
     if (!response.ok) {
       await response.body?.cancel();
-      return null;
+      return failed(`http_status:${response.status}`);
     }
     const body = (await response.json()) as { verdict?: unknown };
     if (typeof body.verdict === "string" && VERDICTS.has(body.verdict as PaycheckVerdict)) {
-      return body.verdict as PaycheckVerdict;
+      return { verdict: body.verdict as PaycheckVerdict, error: null };
     }
-    return null;
-  } catch {
-    return null;
+    return failed("parse");
+  } catch (error) {
+    return failed(lookupError(error));
   }
 }
