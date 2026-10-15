@@ -33,6 +33,8 @@ ANON_DAILY_LIMIT = "100"
 KEY_DAILY_LIMIT = "1000"
 KEYS_PER_DAY = "20"
 MICRO_THRESHOLD_USD = "1"
+# Live merchant trust. The local known-host list still applies with no network.
+PAYCHECK_URL = "https://paycheck.toolweather.workers.dev"
 
 # PAY_TO is intentionally not set here. Put the receiving wallet in a secret
 # or in .dev.vars locally. Do not commit a real address.
@@ -41,3 +43,7 @@ MICRO_THRESHOLD_USD = "1"
 # Toolweather suite proxy. Same value as the Toolweather Worker's
 # BUNDLE_PROXY_SECRET. Do not commit it.
 #   npx wrangler secret put BUNDLE_PROXY_SECRET
+#
+# Optional PayCheck key. Leave unset to use BUNDLE_PROXY_SECRET with
+# SpendGate's internal bundle client, or PayCheck's anonymous tier.
+#   npx wrangler secret put PAYCHECK_API_KEY

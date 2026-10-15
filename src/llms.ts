@@ -68,6 +68,8 @@ Start at 100.
 
 - Amount penalty = min(75, round(25 * log10(1 + amount_usd))). Higher spend lowers the score.
 - Merchant: known 0, unknown 18, missing 24. A non-https, IP, or local URL adds 12.
+- PayCheck (POST ${config.paycheckUrl}/v1/check, field target) runs for a domain, https URL, or 0x payee that is not already on the local known-host list. trusted counts as known. suspicious adds 30. block adds 42, forces block, and caps the score at 24, including under the micro threshold. unknown is not auto-trusted. If PayCheck is down or not OK, local merchant rules are used and the score still returns.
+- That PayCheck call is SpendGate's, not a second bill for the caller. It uses PAYCHECK_API_KEY when set, otherwise BUNDLE_PROXY_SECRET with SpendGate's own bundle client, otherwise PayCheck's anonymous free tier. The caller's key and x-tw-bundle-client are not forwarded.
 - Category: low 0, medium 12, high 30, unknown 18.
 - Currency: USD/USDC 0, USDT/DAI/USDP/PYUSD 6, other 12.
 - Raising hints add 6 each, cap 18: new_payee, new_merchant, first_payment, high_velocity, mismatched_purpose, off_platform, shared_wallet.

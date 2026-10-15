@@ -31,7 +31,7 @@ export function openApiDocument(origin: string, config: Config) {
           operationId: "scoreSpend",
           summary: "Score one planned spend",
           description:
-            "Free while under the daily cap. After the cap, respond to HTTP 402 by paying the x402 requirement and retrying with PAYMENT-SIGNATURE. Validation failures do not consume quota.",
+            "Free while under the daily cap. After the cap, respond to HTTP 402 by paying the x402 requirement and retrying with PAYMENT-SIGNATURE. Validation failures do not consume quota. A domain, https URL, or 0x merchant not on the local allowlist is checked with PayCheck as SpendGate's own call. A PayCheck outage keeps the local merchant rules.",
           parameters: [
             {
               name: "Authorization",
@@ -166,6 +166,7 @@ export function openApiDocument(origin: string, config: Config) {
       asset: config.asset,
       facilitator: config.facilitatorUrl,
       paid_configured: Boolean(config.payTo),
+      paycheck_url: config.paycheckUrl,
     },
   };
 }

@@ -128,7 +128,7 @@ export function createApp(options: AppOptions = {}) {
   app.get("/v1/policy", (c) => {
     const config = readConfig(c.env);
     return c.json({
-      ...policyDocument(config.microThresholdUsd),
+      ...policyDocument(config.microThresholdUsd, config.paycheckUrl),
       anonymous_daily_limit: config.anonDailyLimit,
       free_key_daily_limit: config.keyDailyLimit,
       keys_per_day: config.keysPerDay,

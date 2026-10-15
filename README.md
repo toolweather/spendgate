@@ -26,7 +26,7 @@ Start at 100, then subtract. Policy version `1`. Full constants: `GET /v1/policy
 | Input | Effect |
 | --- | --- |
 | Amount | `min(75, round(25 * log10(1 + usd)))`. Higher spend lowers the score. |
-| Merchant | Known host or `known_merchant` hint: 0. Unknown: 18. Missing: 24. Non-https, IP, or local URL: +12. |
+| Merchant | Known host or `known_merchant` hint: 0. Unknown: 18. Missing: 24. Non-https, IP, or local URL: +12. PayCheck `suspicious`: 30. PayCheck `block`: 42, verdict `block`, score at most 24. |
 | Category | High 30: `crypto_transfer`, `irreversible`, `gift_card`. Medium 12: `api_call`, `saas`, `infra`. Low 0: `status_check`. Anything else: 18. |
 | Currency | `USD` and `USDC`: 0. `USDT`, `DAI`, `USDP`, `PYUSD`: 6. Other: 12. Default `USDC`. |
 | Risk hints | Raising hints add 6 each, cap 18. Lowering hints subtract 6 each, cap 12. Hints are self-reported. |
@@ -39,6 +39,21 @@ Hard overrides, applied after the raw score:
 2. Otherwise, amount strictly under the micro threshold forces `approve` and raises the published score to at least 80.
 
 `agent_id` is echoed and not scored.
+
+### PayCheck
+
+When the merchant is a domain, an http(s) URL, or a `0x` wallet, and it is not already a public https host on the local known-host list, SpendGate calls [PayCheck](https://paycheck.toolweather.workers.dev) `POST /v1/check` with `{ "target": "..." }`.
+
+| PayCheck verdict | SpendGate |
+| --- | --- |
+| `trusted` | Known merchant, same as the allowlist or `known_merchant`. |
+| `unknown` | Today's unknown-merchant handling. Not auto-trusted. |
+| `suspicious` | Merchant penalty 30 (plus 12 if the URL is insecure). Not known. |
+| `block` | Merchant penalty 42 (plus 12 if insecure). Verdict `block`, published score at most 24, including under the $1 micro threshold. |
+
+`openai.com` and the other `KNOWN_HOST_SUFFIXES` stay known with no network call, so a PayCheck outage does not change them. Any other PayCheck failure (timeout, non-OK, bad JSON) falls back to the local merchant rules and `score_spend` still returns a score. A raw IP or `http` URL keeps the insecure penalty on that fallback.
+
+The lookup is SpendGate's internal call, not a second charge to the caller. It does not forward the caller's `sg_live_` key or `x-tw-bundle-client`. Auth, in order: optional `PAYCHECK_API_KEY`; else `BUNDLE_PROXY_SECRET` with SpendGate's own bundle client `7370656e6467617465` (hex for `spendgate`, 1,000 PayCheck checks per UTC day); else PayCheck's anonymous free tier (100 per UTC day). No new secret is required. `PAYCHECK_URL` defaults to `https://paycheck.toolweather.workers.dev`.
 
 ## Free tier and x402
 
@@ -156,7 +171,7 @@ npx wrangler secret put BUNDLE_PROXY_SECRET
 npx wrangler deploy
 ```
 
-`BUNDLE_PROXY_SECRET` must be the same value as on the Toolweather Worker. Set it after merge, then redeploy. Do not commit the value. Until that secret is set, proxied calls without an `sg_live_…` key keep sharing the anonymous daily bucket.
+`BUNDLE_PROXY_SECRET` must be the same value as on the Toolweather Worker. Set it after merge, then redeploy. Do not commit the value. Until that secret is set, proxied calls without an `sg_live_…` key keep sharing the anonymous daily bucket. The same secret, when set, also attributes SpendGate's PayCheck lookups to SpendGate's internal bundle client. `PAYCHECK_URL` is already in `[vars]`. `PAYCHECK_API_KEY` is optional (`npx wrangler secret put PAYCHECK_API_KEY`) and is not required for the anonymous PayCheck tier.
 
 `npm run dry-run` bundles the Worker the way a deploy would, without publishing.
 

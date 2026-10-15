@@ -185,6 +185,7 @@ describe("HTTP API", () => {
     expect(paidBody.detail.payment.transaction).toBe("0xabc");
     expect(calls.map((call) => call.split(" ")[0] + " " + new URL(call.split(" ")[1]!).pathname)).toEqual([
       "POST /verify",
+      "POST /v1/check",
       "POST /settle",
     ]);
 
@@ -220,9 +221,15 @@ describe("HTTP API", () => {
     expect((await health.json()) as { ok: boolean }).toMatchObject({ ok: true, service: "spendgate" });
 
     const policy = await built.app.request("/v1/policy", {}, built.env);
-    const policyBody = (await policy.json()) as { policy_version: string; anonymous_daily_limit: number };
+    const policyBody = (await policy.json()) as {
+      policy_version: string;
+      anonymous_daily_limit: number;
+      paycheck: { url: string; attribution: { bundle_client: string } };
+    };
     expect(policyBody.policy_version).toBe("1");
     expect(policyBody.anonymous_daily_limit).toBe(100);
+    expect(policyBody.paycheck.url).toBe("https://paycheck.toolweather.workers.dev");
+    expect(policyBody.paycheck.attribution.bundle_client).toBe("7370656e6467617465");
 
     const card = await built.app.request("/.well-known/mcp", {}, built.env);
     const cardBody = (await card.json()) as { transport: { endpoint: string }; tools: Array<{ name: string }> };
@@ -250,6 +257,106 @@ describe("HTTP API", () => {
       testEnv(),
     );
     expect(res.status).toBe(503);
+  });
+});
+
+describe("PayCheck merchant trust", () => {
+  it("keeps an allowlisted https merchant known without calling PayCheck", async () => {
+    let called = false;
+    const fetchImpl: typeof fetch = async () => {
+      called = true;
+      return Response.json({ verdict: "block", score: 5 });
+    };
+    const built = appFor({}, fetchImpl);
+    const res = await post(built, "/v1/score", {
+      amount: 4,
+      category: "api_call",
+      merchant: "https://api.openai.com",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      verdict: string;
+      detail: { merchant_status: string; paycheck_verdict: string | null };
+    };
+    expect(called).toBe(false);
+    expect(body.verdict).toBe("approve");
+    expect(body.detail.merchant_status).toBe("known");
+    expect(body.detail.paycheck_verdict).toBeNull();
+  });
+
+  it("uses a live trusted verdict and blocks http or raw IP when PayCheck says block", async () => {
+    const fetchImpl: typeof fetch = async (_input, init) => {
+      const target = JSON.parse(String(init?.body)) as { target: string };
+      if (target.target.startsWith("http://") || target.target.includes("203.0.113.10")) {
+        return Response.json({ verdict: "block", score: 8 });
+      }
+      return Response.json({ verdict: "trusted", score: 100 });
+    };
+    const built = appFor({}, fetchImpl);
+
+    const trusted = await post(built, "/v1/score", {
+      amount: 4,
+      category: "api_call",
+      merchant: "https://api.perplexity.ai/chat",
+    });
+    expect(trusted.status).toBe(200);
+    const trustedBody = (await trusted.json()) as {
+      verdict: string;
+      score: number;
+      detail: { merchant_status: string; paycheck_verdict: string | null; penalties: { merchant: number } };
+    };
+    expect(trustedBody.detail.paycheck_verdict).toBe("trusted");
+    expect(trustedBody.detail.merchant_status).toBe("known");
+    expect(trustedBody.detail.penalties.merchant).toBe(0);
+    expect(trustedBody.verdict).toBe("approve");
+    expect(trustedBody.score).toBe(71);
+
+    const http = await post(built, "/v1/score", {
+      amount: 25,
+      category: "saas",
+      merchant: "http://pay.example.com/checkout",
+    });
+    const httpBody = (await http.json()) as {
+      verdict: string;
+      detail: { paycheck_verdict: string | null; penalties: { merchant: number } };
+    };
+    expect(http.status).toBe(200);
+    expect(httpBody.verdict).toBe("block");
+    expect(httpBody.detail.paycheck_verdict).toBe("block");
+    expect(httpBody.detail.penalties.merchant).toBeGreaterThan(18);
+
+    const ip = await post(built, "/v1/score", {
+      amount: 0.2,
+      category: "status_check",
+      merchant: "https://203.0.113.10/pay",
+    });
+    const ipBody = (await ip.json()) as { verdict: string; score: number; detail: { micro_approved: boolean } };
+    expect(ipBody.verdict).toBe("block");
+    expect(ipBody.score).toBeLessThanOrEqual(24);
+    expect(ipBody.detail.micro_approved).toBe(false);
+  });
+
+  it("still scores when PayCheck is unreachable", async () => {
+    const fetchImpl: typeof fetch = async () => {
+      throw new Error("paycheck down");
+    };
+    const built = appFor({}, fetchImpl);
+    const res = await post(built, "/v1/score", {
+      amount: 25,
+      category: "saas",
+      merchant: "https://pay.example.com/checkout",
+    });
+    expect(res.status).toBe(200);
+    const body = (await res.json()) as {
+      verdict: string;
+      score: number;
+      detail: { merchant_status: string; paycheck_verdict: string | null; penalties: { merchant: number } };
+    };
+    expect(body.detail.paycheck_verdict).toBeNull();
+    expect(body.detail.merchant_status).toBe("unknown");
+    expect(body.detail.penalties.merchant).toBe(18);
+    expect(body.verdict).toBe("block");
+    expect(body.score).toBe(35);
   });
 });
 

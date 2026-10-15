@@ -16,9 +16,31 @@ export interface Env {
   /**
    * Shared secret with the Toolweather Worker. Set with
    * `npx wrangler secret put BUNDLE_PROXY_SECRET`. Never commit the value.
+   * Also sent on SpendGate's own PayCheck lookups when PAYCHECK_API_KEY is unset.
    */
   BUNDLE_PROXY_SECRET?: string;
+  /** PayCheck origin. Defaults to the public Toolweather worker. */
+  PAYCHECK_URL?: string;
+  /**
+   * Optional PayCheck `pc_live_` key for server-side merchant checks.
+   * Unset uses the bundle secret, then PayCheck's anonymous free tier.
+   * `npx wrangler secret put PAYCHECK_API_KEY`. Never commit the value.
+   */
+  PAYCHECK_API_KEY?: string;
 }
+
+/** Public PayCheck worker. Anonymous checks work at low volume. */
+export const DEFAULT_PAYCHECK_URL = "https://paycheck.toolweather.workers.dev";
+
+/**
+ * Bundle client for SpendGate's own PayCheck calls. ASCII "spendgate" in hex
+ * (18 chars). PayCheck gives a 16+ hex client 1,000 checks per UTC day.
+ * This is not the end user's `x-tw-bundle-client`.
+ */
+export const SPENDGATE_PAYCHECK_CLIENT = "7370656e6467617465";
+
+/** Give up on PayCheck and use local merchant rules after this. */
+export const PAYCHECK_TIMEOUT_MS = 4_000;
 
 export interface Config {
   payTo: string | null;
@@ -36,6 +58,9 @@ export interface Config {
   maxTimeoutSeconds: number;
   /** Null when the Worker secret is unset. Headers are ignored in that case. */
   bundleProxySecret: string | null;
+  paycheckUrl: string;
+  /** Null when unset. SpendGate then uses the bundle secret or anonymous PayCheck. */
+  paycheckApiKey: string | null;
 }
 
 const USDC_DECIMALS = 6;
@@ -80,6 +105,8 @@ export function readConfig(env: Env): Config {
     microThresholdUsd: numEnv(env.MICRO_THRESHOLD_USD, 1),
     maxTimeoutSeconds: 60,
     bundleProxySecret: (env.BUNDLE_PROXY_SECRET ?? "").trim() || null,
+    paycheckUrl: (env.PAYCHECK_URL ?? "").trim().replace(/\/$/, "") || DEFAULT_PAYCHECK_URL,
+    paycheckApiKey: (env.PAYCHECK_API_KEY ?? "").trim() || null,
   };
 }
 

@@ -116,7 +116,7 @@
       <div class="rules">
         <div class="rule">
           <h3>Higher spend, lower score</h3>
-          <p>The amount penalty is <span class="mono">min(75, round(25 × log10(1 + usd)))</span>. A missing or unknown merchant lowers the score further. Known hosts are listed on <a href="/v1/policy">/v1/policy</a>.</p>
+          <p>The amount penalty is <span class="mono">min(75, round(25 × log10(1 + usd)))</span>. A missing or unknown merchant lowers the score further. Known hosts on <a href="/v1/policy">/v1/policy</a> stay known with no network call. Other domains, https URLs, and 0x payees are checked with PayCheck. If PayCheck is down, the local merchant rules still apply.</p>
         </div>
         <div class="rule">
           <h3>Category risk</h3>
@@ -124,7 +124,7 @@
         </div>
         <div class="rule">
           <h3>Two hard rules</h3>
-          <p>Over a budget you pass in, the verdict is block. Strictly under $<span data-policy="micro_threshold_usd">1</span>, it is approve, unless that budget rule fires first.</p>
+          <p>Over a budget you pass in, the verdict is block. A PayCheck block is also do not pay. Strictly under $<span data-policy="micro_threshold_usd">1</span>, it is approve, unless one of those block rules fires first.</p>
         </div>
       </div>
     </section>
