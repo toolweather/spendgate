@@ -25,8 +25,9 @@ const numberProp = (description: string) => ({ type: "number", description });
 /**
  * MCP clients treat a missing hint as the unsafe default (not read-only,
  * destructive, not idempotent, open-world). These tools never contact the
- * merchant: score_spend records a local verdict and may return 402,
- * get_quota only reads, and get_api_key only inserts a key.
+ * merchant. score_spend may ask PayCheck (a fixed trust service) about a
+ * domain, https URL, or 0x payee, may return 402, get_quota only reads,
+ * and get_api_key only inserts a key. PayCheck outages stay on local rules.
  */
 const closedWorld = { destructiveHint: false, openWorldHint: false } as const;
 
@@ -39,7 +40,7 @@ export const TOOLS = [
       "Do not use it for a pure read, or for a status_check under $1 you will not pay; that still burns a free score and approves unless a budget you pass is exceeded.",
       "Each call uses one free score (anonymous 100/UTC day, sg_live_ key 1,000 from get_api_key).",
       "Past that cap the call is HTTP 402 and costs 0.001 USDC on Base via x402.",
-      "It does not pay the merchant. While free quota remains, the same arguments consume another score.",
+      "It does not pay the merchant. A domain, https URL, or 0x payee that is not on the local known-host list is checked with PayCheck. Trusted counts as a known merchant. Block means do not pay, including under the micro threshold. If PayCheck is unreachable, local merchant rules are used and the score still returns. While free quota remains, the same arguments consume another score.",
       "category overrides purpose. When category is omitted, purpose is matched as a category name; any other prose is unknown risk.",
       "merchant overrides endpoint when both are set.",
       "A set daily_budget_remaining or monthly_budget_remaining blocks when amount is greater; omitted budgets are skipped.",

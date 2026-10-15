@@ -1,5 +1,6 @@
 import type { Config } from "./env.js";
 import { encodeBase64Json, randomHex, sha256Hex } from "./crypto.js";
+import { lookupPaycheck, paycheckTarget } from "./paycheck.js";
 import { parseSpendBody, scoreSpend, type ScoreResult } from "./scoring.js";
 import type { StoredKey, UsageStore } from "./store.js";
 import {
@@ -45,6 +46,7 @@ export interface ScoreResponseBody {
     category: string;
     category_band: string;
     merchant_status: string;
+    paycheck_verdict: ScoreResult["paycheck_verdict"];
     budget_blocked: boolean;
     micro_approved: boolean;
     amount: number;
@@ -142,6 +144,7 @@ export function toScoreBody(result: ScoreResult, quota: QuotaView): ScoreRespons
       category: result.category,
       category_band: result.category_band,
       merchant_status: result.merchant_status,
+      paycheck_verdict: result.paycheck_verdict,
       budget_blocked: result.budget_blocked,
       micro_approved: result.micro_approved,
       amount: result.amount,
@@ -476,11 +479,17 @@ export async function scoreRequest(args: {
   }
 
   const checkId = `chk_${(args.ids ?? randomHex)(10)}`;
-  const result = scoreSpend(parsed.spend, {
-    now: args.now,
-    checkId,
-    microThresholdUsd: args.config.microThresholdUsd,
-  });
+  const target = paycheckTarget(parsed.spend.merchant);
+  const paycheck = target ? await lookupPaycheck(args.fetchImpl, args.config, target) : null;
+  const result = scoreSpend(
+    parsed.spend,
+    {
+      now: args.now,
+      checkId,
+      microThresholdUsd: args.config.microThresholdUsd,
+    },
+    paycheck,
+  );
 
   let settlement: SettleResponse | null = null;
   if (pending) {

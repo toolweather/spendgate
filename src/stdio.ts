@@ -17,6 +17,7 @@ function emptyList(id: string | number | null, key: "resources" | "prompts" | "r
 /**
  * Glama starts this process with no wallet and no network it should use.
  * PAY_TO is ignored so a container env cannot reach the x402 facilitator.
+ * fetch throws, so a PayCheck lookup fails open to the local merchant rules.
  */
 export function createStdioSession(): StdioSession {
   const store = new MemoryUsageStore();

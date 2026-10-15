@@ -6,3 +6,8 @@ PAY_TO=
 # Set the deployed secret with: npx wrangler secret put BUNDLE_PROXY_SECRET
 # Do not commit the value.
 BUNDLE_PROXY_SECRET=
+
+# Optional. Defaults to https://paycheck.toolweather.workers.dev.
+# PAYCHECK_URL=
+# Optional pc_live_ key. Unset uses BUNDLE_PROXY_SECRET, then anonymous PayCheck.
+# PAYCHECK_API_KEY=

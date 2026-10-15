@@ -121,6 +121,89 @@ describe("verdicts", () => {
     expect(eth.score).toBeLessThan(usdc.score);
   });
 
+  it("treats a bare allowlisted host as known", () => {
+    const result = judge({ amount: 4, category: "api_call", merchant: "api.openai.com" });
+    expect(result.merchant_status).toBe("known");
+    expect(result.paycheck_verdict).toBeNull();
+    expect(result.penalties.merchant).toBe(0);
+    expect(result.score).toBe(71);
+  });
+
+  it("maps PayCheck trusted to a known merchant and does not auto-trust unknown", () => {
+    const local = judge({ amount: 4, category: "api_call", merchant: "https://api.perplexity.ai/chat" });
+    const viaPaycheck = scoreSpend(
+      spend({ amount: 4, category: "api_call", merchant: "https://api.perplexity.ai/chat" }),
+      { now: NOW, checkId: "chk_test", microThresholdUsd: 1 },
+      "trusted",
+    );
+    expect(local.merchant_status).toBe("unknown");
+    expect(viaPaycheck.merchant_status).toBe("known");
+    expect(viaPaycheck.paycheck_verdict).toBe("trusted");
+    expect(viaPaycheck.penalties.merchant).toBe(0);
+    expect(viaPaycheck.score).toBe(local.score + 18);
+    expect(viaPaycheck.reasons.some((reason) => reason.includes("PayCheck verdict is trusted."))).toBe(true);
+
+    const hinted = scoreSpend(
+      spend({
+        amount: 4,
+        category: "api_call",
+        merchant: "https://pay.example.com/checkout",
+        riskHints: ["known_merchant"],
+      }),
+      { now: NOW, checkId: "chk_test", microThresholdUsd: 1 },
+      "unknown",
+    );
+    expect(hinted.merchant_status).toBe("known");
+    expect(hinted.paycheck_verdict).toBe("unknown");
+  });
+
+  it("penalizes PayCheck suspicious more than unknown and blocks a PayCheck block", () => {
+    const unknown = judge({ amount: 25, category: "saas", merchant: "https://pay.example.com/checkout" });
+    const suspicious = scoreSpend(
+      spend({ amount: 25, category: "saas", merchant: "https://pay.example.com/checkout" }),
+      { now: NOW, checkId: "chk_test", microThresholdUsd: 1 },
+      "suspicious",
+    );
+    expect(unknown.penalties.merchant).toBe(18);
+    expect(suspicious.penalties.merchant).toBe(30);
+    expect(suspicious.score).toBeLessThan(unknown.score);
+    expect(suspicious.merchant_status).toBe("unknown");
+    expect(suspicious.verdict).toBe("block");
+
+    const hinted = scoreSpend(
+      spend({
+        amount: 4,
+        category: "api_call",
+        merchant: "https://pay.example.com/checkout",
+        riskHints: ["known_merchant"],
+      }),
+      { now: NOW, checkId: "chk_test", microThresholdUsd: 1 },
+      "suspicious",
+    );
+    expect(hinted.merchant_status).toBe("unknown");
+    expect(hinted.penalties.merchant).toBe(30);
+
+    const blocked = scoreSpend(
+      spend({ amount: 0.2, category: "status_check", merchant: "https://opena1.com" }),
+      { now: NOW, checkId: "chk_test", microThresholdUsd: 1 },
+      "block",
+    );
+    expect(blocked.verdict).toBe("block");
+    expect(blocked.micro_approved).toBe(false);
+    expect(blocked.score).toBeLessThanOrEqual(24);
+    expect(blocked.penalties.merchant).toBe(42);
+    expect(blocked.recommended_action).toMatch(/PayCheck blocked/);
+
+    const httpBlocked = scoreSpend(
+      spend({ amount: 0.2, category: "status_check", merchant: "http://203.0.113.10/pay" }),
+      { now: NOW, checkId: "chk_test", microThresholdUsd: 1 },
+      "block",
+    );
+    expect(httpBlocked.verdict).toBe("block");
+    expect(httpBlocked.penalties.merchant).toBe(54);
+    expect(httpBlocked.reasons.some((reason) => reason.includes("not a public https"))).toBe(true);
+  });
+
   it("is deterministic and echoes the check time", () => {
     const a = judge({ amount: 25, riskHints: ["new_payee", "within_policy"] });
     const b = judge({ amount: 25, riskHints: ["new_payee", "within_policy"] });

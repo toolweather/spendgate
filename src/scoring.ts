@@ -1,12 +1,15 @@
+import { DEFAULT_PAYCHECK_URL, PAYCHECK_TIMEOUT_MS, SPENDGATE_PAYCHECK_CLIENT } from "./env.js";
+
 /**
  * SpendGate scoring policy v1.
  *
- * Deterministic. The same input always produces the same score and verdict.
- * Start at 100 and subtract penalties. Thresholds, then two hard overrides:
+ * Deterministic given the same PayCheck verdict (or a miss). Start at 100 and subtract
+ * penalties. Thresholds, then hard overrides:
  *
  * 1. If amount is greater than a supplied daily or monthly budget remaining, verdict is block
  *    and the published score is at most 24.
- * 2. Else if amount is strictly under the free micro threshold (default $1), verdict is approve
+ * 2. Else if PayCheck returned block, verdict is block and the published score is at most 24.
+ * 3. Else if amount is strictly under the free micro threshold (default $1), verdict is approve
  *    and the published score is at least 80.
  *
  * Otherwise:
@@ -16,6 +19,8 @@
  *
  * Amount penalty: min(75, round(25 * log10(1 + amount_usd))). Higher spend lowers the score.
  * Merchant: known 0, unknown 18, missing 24. Insecure URL (not https, IP, or local) adds 12.
+ * PayCheck trusted counts as known. suspicious is 30. block is 42. Both still add the
+ * insecure extra. unknown and a failed lookup keep this local classification.
  * Category: low 0, medium 12, high 30, unknown 18.
  *   high: crypto_transfer, irreversible, gift_card
  *   medium: api_call, saas, infra
@@ -45,6 +50,16 @@ export type CategoryName = keyof typeof CATEGORY_BAND;
 export type CategoryBand = "low" | "medium" | "high" | "unknown";
 export type Verdict = "approve" | "ask_human" | "block";
 export type MerchantStatus = "known" | "unknown" | "missing";
+export type PaycheckVerdict = "trusted" | "unknown" | "suspicious" | "block";
+
+export const MERCHANT_PENALTY = {
+  known: 0,
+  unknown: 18,
+  missing: 24,
+  insecure_extra: 12,
+  paycheck_suspicious: 30,
+  paycheck_block: 42,
+} as const;
 
 const BAND_PENALTY: Record<CategoryBand, number> = {
   low: 0,
@@ -136,6 +151,8 @@ export interface ScoreResult {
   category: string;
   category_band: CategoryBand;
   merchant_status: MerchantStatus;
+  /** Live PayCheck verdict, or null when the allowlist skipped it or the lookup failed. */
+  paycheck_verdict: PaycheckVerdict | null;
   budget_blocked: boolean;
   micro_approved: boolean;
   amount: number;
@@ -175,14 +192,22 @@ export function resolveCategory(category: string | null, purpose: string | null)
   return { category: key.slice(0, 64), band: "unknown" };
 }
 
-function hostMatches(host: string): boolean {
-  const h = host.replace(/\.$/, "").toLowerCase();
-  return KNOWN_HOST_SUFFIXES.some((suffix) => h === suffix || h.endsWith(`.${suffix}`));
-}
-
-function isIpHost(host: string): boolean {
+export function isIpHost(host: string): boolean {
   if (/^\d{1,3}(\.\d{1,3}){3}$/.test(host)) return true;
   return host.includes(":");
+}
+
+/** A DNS hostname with a dot. Raw IPs, localhost, and single labels are not domains. */
+export function isDomainHost(host: string): boolean {
+  const h = host.replace(/\.$/, "").toLowerCase();
+  if (!h || h.length > 253 || !h.includes(".") || isIpHost(h)) return false;
+  const labels = h.split(".");
+  return labels.every((label) => /^[a-z0-9]([a-z0-9-]{0,61}[a-z0-9])?$/.test(label));
+}
+
+export function hostOnAllowlist(host: string): boolean {
+  const h = host.replace(/\.$/, "").toLowerCase();
+  return KNOWN_HOST_SUFFIXES.some((suffix) => h === suffix || h.endsWith(`.${suffix}`));
 }
 
 export function classifyMerchant(
@@ -193,9 +218,9 @@ export function classifyMerchant(
   const value = merchant?.trim() ?? "";
   if (!value) {
     if (hintKnown) {
-      return { status: "known", insecure: false, penalty: 0, label: "caller-marked known merchant" };
+      return { status: "known", insecure: false, penalty: MERCHANT_PENALTY.known, label: "caller-marked known merchant" };
     }
-    return { status: "missing", insecure: false, penalty: 24, label: "no merchant" };
+    return { status: "missing", insecure: false, penalty: MERCHANT_PENALTY.missing, label: "no merchant" };
   }
 
   let known = hintKnown || KNOWN_NAMES.has(value.toLowerCase());
@@ -206,7 +231,7 @@ export function classifyMerchant(
       const url = new URL(value);
       const host = url.hostname.toLowerCase();
       label = host || value;
-      known = known || hostMatches(host);
+      known = known || hostOnAllowlist(host);
       insecure =
         url.protocol !== "https:" ||
         isIpHost(host) ||
@@ -215,10 +240,56 @@ export function classifyMerchant(
     } catch {
       known = hintKnown;
     }
+  } else if (isDomainHost(value)) {
+    label = value.replace(/\.$/, "").toLowerCase();
+    known = known || hostOnAllowlist(label);
   }
 
-  const penalty = (known ? 0 : 18) + (insecure ? 12 : 0);
+  const penalty =
+    (known ? MERCHANT_PENALTY.known : MERCHANT_PENALTY.unknown) +
+    (insecure ? MERCHANT_PENALTY.insecure_extra : 0);
   return { status: known ? "known" : "unknown", insecure, penalty, label };
+}
+
+export interface MerchantAssessment {
+  status: MerchantStatus;
+  insecure: boolean;
+  penalty: number;
+  label: string;
+  paycheck: PaycheckVerdict | null;
+}
+
+/**
+ * Local classification, then a live PayCheck verdict when one was returned.
+ * `null` and `unknown` keep today's rules. Negative verdicts beat a caller
+ * `known_merchant` hint. `trusted` is the allowlist effect, plus any insecure extra.
+ */
+export function assessMerchant(
+  merchant: string | null,
+  hints: readonly string[],
+  paycheck: PaycheckVerdict | null,
+): MerchantAssessment {
+  const local = classifyMerchant(merchant, hints);
+  if (paycheck === null || paycheck === "unknown") {
+    return { ...local, paycheck };
+  }
+  if (paycheck === "trusted") {
+    return {
+      status: "known",
+      insecure: local.insecure,
+      penalty: local.insecure ? MERCHANT_PENALTY.insecure_extra : MERCHANT_PENALTY.known,
+      label: local.label,
+      paycheck,
+    };
+  }
+  const base = paycheck === "block" ? MERCHANT_PENALTY.paycheck_block : MERCHANT_PENALTY.paycheck_suspicious;
+  return {
+    status: local.status === "missing" ? "missing" : "unknown",
+    insecure: local.insecure,
+    penalty: base + (local.insecure ? MERCHANT_PENALTY.insecure_extra : 0),
+    label: local.label,
+    paycheck,
+  };
 }
 
 function currencyPenalty(currency: string): number {
@@ -238,10 +309,16 @@ function verdictFor(score: number): Verdict {
   return "block";
 }
 
-function actionFor(verdict: Verdict, budgetBlocked: boolean, microApproved: boolean): string {
+function actionFor(
+  verdict: Verdict,
+  budgetBlocked: boolean,
+  paycheckBlocked: boolean,
+  microApproved: boolean,
+): string {
   if (budgetBlocked) {
     return "Do not pay. Lower the amount or wait until the remaining budget can cover it.";
   }
+  if (paycheckBlocked) return "Do not pay. PayCheck blocked this payee.";
   if (microApproved) return "Pay. This amount is under the free micro threshold.";
   if (verdict === "approve") return "Pay. The planned spend fits the v1 policy.";
   if (verdict === "ask_human") return "Do not pay yet. Ask a human to confirm this spend.";
@@ -251,9 +328,10 @@ function actionFor(verdict: Verdict, budgetBlocked: boolean, microApproved: bool
 export function scoreSpend(
   input: NormalizedSpend,
   clock: { now: Date; checkId: string; microThresholdUsd: number },
+  paycheck: PaycheckVerdict | null = null,
 ): ScoreResult {
   const category = resolveCategory(input.category, input.purpose);
-  const merchant = classifyMerchant(input.merchant, input.riskHints);
+  const merchant = assessMerchant(input.merchant, input.riskHints, paycheck);
   const amount = amountPenalty(input.amount);
   const categoryPenalty = BAND_PENALTY[category.band];
   const currency = currencyPenalty(input.currency);
@@ -273,11 +351,15 @@ export function scoreSpend(
   const overMonthly =
     input.monthlyBudgetRemaining !== null && input.amount > input.monthlyBudgetRemaining;
   const budgetBlocked = overDaily || overMonthly;
-  const microApproved = !budgetBlocked && input.amount < clock.microThresholdUsd;
+  const paycheckBlocked = merchant.paycheck === "block";
+  const microApproved = !budgetBlocked && !paycheckBlocked && input.amount < clock.microThresholdUsd;
 
   let score = raw;
   let verdict = verdictFor(raw);
   if (budgetBlocked) {
+    score = Math.min(raw, BUDGET_SCORE_CAP);
+    verdict = "block";
+  } else if (paycheckBlocked) {
     score = Math.min(raw, BUDGET_SCORE_CAP);
     verdict = "block";
   } else if (microApproved) {
@@ -304,12 +386,19 @@ export function scoreSpend(
     reasons.push(`Spend of ${money(input.amount)} lowers the score by ${amount}.`);
   }
 
-  if (merchant.status === "missing") {
+  if (merchant.paycheck === "block") {
+    reasons.push(`PayCheck blocks ${merchant.label}. Do not pay this payee.`);
+  } else if (merchant.paycheck === "suspicious") {
+    reasons.push(`PayCheck marks ${merchant.label} suspicious.`);
+  } else if (merchant.status === "missing") {
     reasons.push("No merchant or endpoint was provided.");
   } else if (merchant.status === "unknown") {
     reasons.push(`Merchant ${merchant.label} is not on the v1 known list.`);
   } else {
     reasons.push(`Merchant ${merchant.label} is treated as known.`);
+  }
+  if (merchant.paycheck === "trusted") {
+    reasons.push("PayCheck verdict is trusted.");
   }
   if (merchant.insecure) {
     reasons.push("Merchant URL is not a public https endpoint.");
@@ -338,7 +427,7 @@ export function scoreSpend(
     score,
     verdict,
     reasons,
-    recommended_action: actionFor(verdict, budgetBlocked, microApproved),
+    recommended_action: actionFor(verdict, budgetBlocked, paycheckBlocked, microApproved),
     checked_at: clock.now.toISOString(),
     check_id: clock.checkId,
     policy_version: POLICY_VERSION,
@@ -346,6 +435,7 @@ export function scoreSpend(
     category: category.category,
     category_band: category.band,
     merchant_status: merchant.status,
+    paycheck_verdict: merchant.paycheck,
     budget_blocked: budgetBlocked,
     micro_approved: microApproved,
     amount: input.amount,
@@ -467,7 +557,7 @@ export function parseSpendBody(body: unknown): ParseResult {
   };
 }
 
-export function policyDocument(microThresholdUsd: number) {
+export function policyDocument(microThresholdUsd: number, paycheckUrl = DEFAULT_PAYCHECK_URL) {
   return {
     policy_version: POLICY_VERSION,
     micro_threshold_usd: microThresholdUsd,
@@ -477,9 +567,38 @@ export function policyDocument(microThresholdUsd: number) {
     micro_score_floor: MICRO_SCORE_FLOOR,
     categories: CATEGORY_BAND,
     known_host_suffixes: KNOWN_HOST_SUFFIXES,
+    paycheck: {
+      url: paycheckUrl,
+      check: "POST /v1/check",
+      target_field: "target",
+      target: "domain, https URL, or 0x wallet",
+      timeout_ms: PAYCHECK_TIMEOUT_MS,
+      local_allowlist:
+        "A public https host on known_host_suffixes (no userinfo, port 443 or default) is known with no network call, including when PayCheck is down.",
+      on_failure:
+        "Unreachable, timed out, or non-OK PayCheck responses use local classifyMerchant. score_spend still returns.",
+      caller_billing:
+        "The lookup is SpendGate's internal call. It does not use the caller's sg_live_ key or x-tw-bundle-client, and it is not a second x402 charge on the score.",
+      attribution: {
+        api_key_env: "PAYCHECK_API_KEY",
+        bundle_secret_env: "BUNDLE_PROXY_SECRET",
+        bundle_client: SPENDGATE_PAYCHECK_CLIENT,
+        bundle_client_note:
+          "Hex for spendgate. Used only when PAYCHECK_API_KEY is unset and BUNDLE_PROXY_SECRET is set. PayCheck counts that client at 1,000 checks per UTC day.",
+        anonymous:
+          "When neither secret is set, PayCheck's anonymous free tier applies (100 checks per UTC day). No new secret is required.",
+      },
+      verdicts: {
+        trusted: "Known merchant (penalty 0), plus insecure_extra when the URL is not public https.",
+        unknown: "Local v1 merchant rules. Not auto-trusted.",
+        suspicious: "Penalty 30 plus insecure_extra. Not known, even if the caller sent known_merchant.",
+        block:
+          "Penalty 42 plus insecure_extra. Verdict block and published score at most 24, including under the micro threshold. Prefer this over allowing.",
+      },
+    },
     scoring: {
       amount_penalty: "min(75, round(25 * log10(1 + amount_usd)))",
-      merchant_penalty: { known: 0, unknown: 18, missing: 24, insecure_extra: 12 },
+      merchant_penalty: MERCHANT_PENALTY,
       category_penalty: BAND_PENALTY,
       currency_penalty: { USD_USDC: 0, other_stable: 6, other: 12 },
       other_stable: [...OTHER_STABLE],
@@ -489,11 +608,12 @@ export function policyDocument(microThresholdUsd: number) {
       hints_down: [...HINTS_DOWN],
       hint_down_each: 6,
       hint_down_cap: 12,
-      known_merchant_hint: "Marks the merchant known and removes the unknown or missing penalty.",
+      known_merchant_hint:
+        "Marks the merchant known and removes the unknown or missing penalty. A PayCheck suspicious or block verdict overrides it.",
       budget:
         "If amount is greater than daily_budget_remaining or monthly_budget_remaining, verdict is block and score is capped at 24. Omitted budgets are not checked. Equal to the remaining budget is allowed.",
       micro:
-        "If amount is strictly under the micro threshold and no supplied budget is exceeded, verdict is approve and score is at least 80.",
+        "If amount is strictly under the micro threshold and no supplied budget is exceeded and PayCheck did not block, verdict is approve and score is at least 80.",
       agent_id: "Echoed and not scored in v1.",
     },
   };
