@@ -46,10 +46,11 @@ Hard overrides, applied after the raw score:
 | --- | --- | --- |
 | Anonymous | 100 scores / UTC day | No key |
 | Free key | 1,000 scores / UTC day | `POST /v1/keys` |
-| Toolweather bundle | 1,000 scores / UTC day per client | Matching `x-tw-bundle-secret` plus `x-tw-bundle-client` |
+| Toolweather key (hex client) | 1,000 scores / UTC day | Matching `x-tw-bundle-secret` plus a hex `x-tw-bundle-client` |
+| Toolweather anonymous caller | 100 scores / UTC day | Matching secret plus an `anon:` client id. Same cap as anonymous. `get_quota` still reports subject and tier `bundle`. |
 | Overage | $0.001 USDC per score | x402 on Base after the cap |
 
-The Toolweather Worker proxies `score_spend`, `get_quota`, and `spendgate_get_api_key` to this server. When it sends `x-tw-bundle-secret` equal to this Worker's `BUNDLE_PROXY_SECRET`, the free-key daily cap is charged to `x-tw-bundle-client` (16–128 hex characters, or Toolweather's `anon:` plus that hash; a longer value uses a stable 128-character prefix). The raw client id is not stored. A presented `sg_live_…` key still wins. A missing, unset, or wrong secret keeps the anonymous IP bucket and does not return an error just because the headers are absent. Key minting through the proxy uses the same client id for the daily mint cap.
+The Toolweather Worker proxies `score_spend`, `get_quota`, and `spendgate_get_api_key` to this server. When it sends `x-tw-bundle-secret` equal to this Worker's `BUNDLE_PROXY_SECRET`, quota is charged to `x-tw-bundle-client`. A hex client (a Toolweather API key hash, 16–128 hex characters; a longer value uses a stable 128-character prefix) gets the free-key cap of 1,000 scores per UTC day. An anonymous Toolweather caller (`anon:` plus that hash) gets the same 100 scores per UTC day as a direct anonymous caller, so a rotating egress address does not mint a fresh 1,000-score bucket. `get_quota` reports subject and tier `bundle` for both, with `daily_limit` set to the cap that applies. The raw client id is not stored. A presented `sg_live_…` key still wins. A missing, unset, or wrong secret keeps the anonymous IP bucket and does not return an error just because the headers are absent. Key minting through the proxy uses the same client id for the daily mint cap.
 
 - Network `eip155:8453` (Base mainnet).
 - Asset USDC `0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913` (EIP-712 name `USD Coin`, version `2`).
