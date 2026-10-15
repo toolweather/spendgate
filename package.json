@@ -11,6 +11,7 @@
     "dev": "wrangler dev --port 43123 --ip 127.0.0.1",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
+    "build:stdio": "tsc -p tsconfig.stdio.json",
     "deploy": "wrangler deploy",
     "dry-run": "wrangler deploy --dry-run --outdir dist",
     "db:migrate:local": "wrangler d1 migrations apply spendgate --local",
