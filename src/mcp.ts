@@ -166,18 +166,10 @@ export function handleMcpMessage(
   }
 
   if (method === "initialize") {
+    // Match Upstream: accept any client protocolVersion and echo it (or fall back).
+    // Strict rejection breaks directory validators that probe older/newer drafts.
     const params = (message.params ?? {}) as { protocolVersion?: string };
-    const requested = params.protocolVersion;
-    const version = MCP_PROTOCOL_VERSIONS.includes(requested as (typeof MCP_PROTOCOL_VERSIONS)[number])
-      ? requested!
-      : handlers.protocolVersion;
-    if (requested && !MCP_PROTOCOL_VERSIONS.includes(requested as (typeof MCP_PROTOCOL_VERSIONS)[number])) {
-      return {
-        status: 400,
-        headers: {},
-        body: rpcError(id, -32602, `Unsupported protocol version. Supported: ${MCP_PROTOCOL_VERSIONS.join(", ")}.`),
-      };
-    }
+    const version = params.protocolVersion || handlers.protocolVersion || "2025-06-18";
     return {
       status: 200,
       headers: { "mcp-protocol-version": version },
@@ -228,9 +220,8 @@ export function handleMcpMessage(
 }
 
 export function negotiateProtocol(header: string | null): { ok: true; version: string } | { ok: false; message: string } {
-  if (!header) return { ok: true, version: "2025-03-26" };
-  if (!MCP_PROTOCOL_VERSIONS.includes(header as (typeof MCP_PROTOCOL_VERSIONS)[number])) {
-    return { ok: false, message: `Unsupported MCP-Protocol-Version. Supported: ${MCP_PROTOCOL_VERSIONS.join(", ")}.` };
-  }
+  // Prefer a known version when the client sends one; otherwise keep going with a default.
+  // Unknown draft versions are accepted so marketplace validators can connect.
+  if (!header) return { ok: true, version: "2025-06-18" };
   return { ok: true, version: header };
 }
