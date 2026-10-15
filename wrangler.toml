@@ -34,7 +34,17 @@ KEY_DAILY_LIMIT = "1000"
 KEYS_PER_DAY = "20"
 MICRO_THRESHOLD_USD = "1"
 # Live merchant trust. The local known-host list still applies with no network.
+# Production calls use the PAYCHECK service binding below. This URL is the
+# fallback for tests and for a Worker started without that binding.
 PAYCHECK_URL = "https://paycheck.toolweather.workers.dev"
+
+# Same-account fetch to paycheck.toolweather.workers.dev fails inside the
+# Worker. The binding calls the paycheck service directly. remote = true
+# makes `wrangler dev` use the deployed worker instead of a local one.
+[[services]]
+binding = "PAYCHECK"
+service = "paycheck"
+remote = true
 
 # PAY_TO is intentionally not set here. Put the receiving wallet in a secret
 # or in .dev.vars locally. Do not commit a real address.

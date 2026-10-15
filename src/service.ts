@@ -47,6 +47,8 @@ export interface ScoreResponseBody {
     category_band: string;
     merchant_status: string;
     paycheck_verdict: ScoreResult["paycheck_verdict"];
+    /** Set when a PayCheck lookup was attempted and did not return a verdict. */
+    paycheck_error: string | null;
     budget_blocked: boolean;
     micro_approved: boolean;
     amount: number;
@@ -130,7 +132,7 @@ function quotaSlice(quota: QuotaView): ScoreResponseBody["quota"] {
   };
 }
 
-export function toScoreBody(result: ScoreResult, quota: QuotaView): ScoreResponseBody {
+export function toScoreBody(result: ScoreResult, quota: QuotaView, paycheckError: string | null = null): ScoreResponseBody {
   return {
     score: result.score,
     verdict: result.verdict,
@@ -145,6 +147,7 @@ export function toScoreBody(result: ScoreResult, quota: QuotaView): ScoreRespons
       category_band: result.category_band,
       merchant_status: result.merchant_status,
       paycheck_verdict: result.paycheck_verdict,
+      paycheck_error: paycheckError,
       budget_blocked: result.budget_blocked,
       micro_approved: result.micro_approved,
       amount: result.amount,
@@ -364,6 +367,8 @@ export async function scoreRequest(args: {
   store: UsageStore;
   config: Config;
   fetchImpl: typeof fetch;
+  /** PayCheck service binding. Used instead of fetchImpl when present. */
+  paycheck?: Fetcher;
   now: Date;
   ip: string | null;
   authorization: string | null;
@@ -480,7 +485,9 @@ export async function scoreRequest(args: {
 
   const checkId = `chk_${(args.ids ?? randomHex)(10)}`;
   const target = paycheckTarget(parsed.spend.merchant);
-  const paycheck = target ? await lookupPaycheck(args.fetchImpl, args.config, target) : null;
+  const paycheck = target
+    ? await lookupPaycheck(args.fetchImpl, args.config, target, args.paycheck)
+    : { verdict: null, error: null };
   const result = scoreSpend(
     parsed.spend,
     {
@@ -488,7 +495,7 @@ export async function scoreRequest(args: {
       checkId,
       microThresholdUsd: args.config.microThresholdUsd,
     },
-    paycheck,
+    paycheck.verdict,
   );
 
   let settlement: SettleResponse | null = null;
@@ -520,7 +527,7 @@ export async function scoreRequest(args: {
   if (settlement && nonce) {
     quota.paid_today += 1;
   }
-  const body = toScoreBody(result, quota);
+  const body = toScoreBody(result, quota, paycheck.error);
   if (settlement) {
     body.detail.payment = {
       payer,

@@ -350,13 +350,69 @@ describe("PayCheck merchant trust", () => {
     const body = (await res.json()) as {
       verdict: string;
       score: number;
-      detail: { merchant_status: string; paycheck_verdict: string | null; penalties: { merchant: number } };
+      detail: {
+        merchant_status: string;
+        paycheck_verdict: string | null;
+        paycheck_error: string | null;
+        penalties: { merchant: number };
+      };
     };
     expect(body.detail.paycheck_verdict).toBeNull();
+    expect(body.detail.paycheck_error).toBe("network");
     expect(body.detail.merchant_status).toBe("unknown");
     expect(body.detail.penalties.merchant).toBe(18);
     expect(body.verdict).toBe("block");
     expect(body.score).toBe(35);
+  });
+
+  it("uses the PAYCHECK service binding for a non-allowlisted merchant and skips it for openai.com", async () => {
+    let publicFetch = 0;
+    const fetchImpl: typeof fetch = async () => {
+      publicFetch += 1;
+      throw new Error("public workers.dev fetch should not run");
+    };
+    const seen: string[] = [];
+    const binding = {
+      fetch: async (input: RequestInfo | URL) => {
+        const request = input instanceof Request ? input : new Request(input);
+        const payload = (await request.json()) as { target: string };
+        seen.push(payload.target);
+        expect(request.method).toBe("POST");
+        expect(new URL(request.url).pathname).toBe("/v1/check");
+        return Response.json({ verdict: "suspicious", score: 55 });
+      },
+    } as Fetcher;
+    const built = appFor({ PAYCHECK: binding }, fetchImpl);
+
+    const suspicious = await post(built, "/v1/score", {
+      amount: 5,
+      category: "saas",
+      merchant: "https://qz7k-pay-now-claim.biz",
+    });
+    expect(suspicious.status).toBe(200);
+    const suspiciousBody = (await suspicious.json()) as {
+      detail: { paycheck_verdict: string | null; paycheck_error: string | null; penalties: { merchant: number } };
+    };
+    expect(suspiciousBody.detail.paycheck_verdict).toBe("suspicious");
+    expect(suspiciousBody.detail.paycheck_error).toBeNull();
+    expect(suspiciousBody.detail.penalties.merchant).toBe(30);
+    expect(seen).toEqual(["https://qz7k-pay-now-claim.biz"]);
+    expect(publicFetch).toBe(0);
+
+    const known = await post(built, "/v1/score", {
+      amount: 5,
+      category: "saas",
+      merchant: "https://api.openai.com",
+    });
+    const knownBody = (await known.json()) as {
+      detail: { merchant_status: string; paycheck_verdict: string | null; paycheck_error: string | null };
+    };
+    expect(known.status).toBe(200);
+    expect(knownBody.detail.merchant_status).toBe("known");
+    expect(knownBody.detail.paycheck_verdict).toBeNull();
+    expect(knownBody.detail.paycheck_error).toBeNull();
+    expect(seen).toEqual(["https://qz7k-pay-now-claim.biz"]);
+    expect(publicFetch).toBe(0);
   });
 });
 

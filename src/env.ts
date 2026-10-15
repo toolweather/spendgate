@@ -27,6 +27,11 @@ export interface Env {
    * `npx wrangler secret put PAYCHECK_API_KEY`. Never commit the value.
    */
   PAYCHECK_API_KEY?: string;
+  /**
+   * Service binding to the PayCheck worker. Preferred over a public
+   * `*.workers.dev` fetch, which fails between workers on the same account.
+   */
+  PAYCHECK?: Fetcher;
 }
 
 /** Public PayCheck worker. Anonymous checks work at low volume. */
