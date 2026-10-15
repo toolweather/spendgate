@@ -10,6 +10,7 @@
     "skipLibCheck": true,
     "verbatimModuleSyntax": true,
     "forceConsistentCasingInFileNames": true,
+    "resolveJsonModule": true,
     "isolatedModules": true,
     "noUnusedLocals": true,
     "noUnusedParameters": true

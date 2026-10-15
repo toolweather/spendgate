@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import plugin from "../lhm.plugin.json";
 import { TOOLS } from "./mcp.js";
 import { createStdioSession, takeStdioMessages } from "./stdio.js";
 
@@ -21,6 +22,46 @@ describe("stdio introspection", () => {
     };
     expect(listed.result.tools).toEqual(TOOLS);
     expect(TOOLS.map((tool) => tool.name)).toEqual(["score_spend", "get_quota", "get_api_key"]);
+  });
+
+  it("publishes safety annotations and the routing cues Glama scores", () => {
+    const byName = Object.fromEntries(TOOLS.map((tool) => [tool.name, tool]));
+
+    for (const tool of TOOLS) {
+      expect(tool.annotations).toMatchObject({
+        destructiveHint: false,
+        openWorldHint: false,
+      });
+      expect(tool.annotations.readOnlyHint).toEqual(tool.name === "get_quota");
+      expect(tool.annotations.idempotentHint).toEqual(tool.name === "get_quota");
+    }
+
+    expect(byName.score_spend?.description).toMatch(/pure read/);
+    expect(byName.score_spend?.description).toMatch(/status_check under \$1/);
+    expect(byName.score_spend?.description).toMatch(/0\.001 USDC/);
+    expect(byName.score_spend?.description).toMatch(/category overrides purpose/);
+    expect(byName.score_spend?.description).toMatch(/merchant overrides endpoint/);
+    expect(byName.score_spend?.description).toMatch(/remaining_today/);
+
+    expect(byName.get_quota?.description).toMatch(/Prefer this over score_spend/);
+    expect(byName.get_quota?.description).toMatch(/does not consume a score/);
+    expect(byName.get_quota?.description).toMatch(/paid_configured/);
+    expect(byName.get_quota?.description).toMatch(/invalid_api_key/);
+
+    expect(byName.get_api_key?.description).toMatch(/Keys do not expire/);
+    expect(byName.get_api_key?.description).toMatch(/no revoke/);
+    expect(byName.get_api_key?.description).toMatch(/Do not call every turn/);
+    expect(byName.get_api_key?.description).toMatch(/key_mint_limit/);
+    expect(byName.get_api_key?.description).toMatch(/label is an optional stored name/);
+  });
+
+  it("keeps the LobeHub catalog on the same descriptions and annotations", () => {
+    expect(plugin.tools.map((tool) => tool.name)).toEqual(TOOLS.map((tool) => tool.name));
+    for (const listed of plugin.tools) {
+      const source = TOOLS.find((tool) => tool.name === listed.name);
+      expect(listed.description).toBe(source?.description);
+      expect(listed.annotations).toEqual(source?.annotations);
+    }
   });
 
   it("scores with in-memory storage and does not configure x402", async () => {
