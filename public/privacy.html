@@ -24,7 +24,7 @@
       <h1>What this server stores.</h1>
       <p>SpendGate does not phone home. The operator of this deployment is the party that holds the database. The software itself has no analytics account and no third-party tracker on the site.</p>
       <h2>Scores</h2>
-      <p>v1 does not keep the spend body. A score is computed and returned. Quota is a counter: how many free scores and how many paid scores ran today for a subject. The anonymous subject is a hash of the UTC date and the client IP, so the raw IP is not written down and the hash changes the next day.</p>
+      <p>v1 does not keep the spend body. A score is computed and returned. Quota is a counter: how many free scores and how many paid scores ran today for a subject. The anonymous subject is a hash of the UTC date and the client IP, so the raw IP is not written down and the hash changes the next day. When the Toolweather suite proxies a call with its bundle secret, the subject is a hash of the UTC date and that client id instead. The raw client id is not stored.</p>
       <h2>API keys</h2>
       <p>A free key is shown once. The database stores a SHA-256 hash, a short prefix, an optional label, the daily limit, and the time it was minted. Losing the secret means minting another key.</p>
       <h2>Payments</h2>

@@ -1,3 +1,8 @@
 # Receiving wallet for x402 USDC on Base mainnet.
 # Leave empty until you have an address you control. Do not commit .dev.vars.
 PAY_TO=
+
+# Same value as the Toolweather Worker's BUNDLE_PROXY_SECRET.
+# Set the deployed secret with: npx wrangler secret put BUNDLE_PROXY_SECRET
+# Do not commit the value.
+BUNDLE_PROXY_SECRET=

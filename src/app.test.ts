@@ -309,3 +309,202 @@ describe("MCP", () => {
     expect(quotaBody.remaining_today).toBe(999);
   });
 });
+
+const BUNDLE_SECRET = "bundle-proxy-secret-test";
+const CLIENT_A = "a".repeat(64);
+const CLIENT_B = "b".repeat(64);
+const CLIENT_ANON = `anon:${"c".repeat(24)}`;
+
+function bundleHeaders(client: string, secret: string = BUNDLE_SECRET): Record<string, string> {
+  return { "x-tw-bundle-secret": secret, "x-tw-bundle-client": client };
+}
+
+describe("Toolweather bundle proxy headers", () => {
+  it("attributes free-key quota to the bundle client when the secret matches", async () => {
+    const built = appFor({ BUNDLE_PROXY_SECRET: BUNDLE_SECRET, ANON_DAILY_LIMIT: "100", KEY_DAILY_LIMIT: "5" });
+
+    const first = await post(built, "/v1/score", microBody, bundleHeaders(CLIENT_A));
+    expect(first.status).toBe(200);
+    const firstBody = (await first.json()) as { quota: { daily_limit: number; remaining_today: number } };
+    expect(firstBody.quota.daily_limit).toBe(5);
+    expect(firstBody.quota.remaining_today).toBe(4);
+    expect(first.headers.get("x-spendgate-quota-remaining")).toBe("4");
+
+    const again = await post(built, "/v1/score", microBody, bundleHeaders(CLIENT_A.toUpperCase()));
+    expect(again.status).toBe(200);
+    expect(((await again.json()) as { quota: { remaining_today: number } }).quota.remaining_today).toBe(3);
+
+    const otherIp = await built.app.request(
+      "/v1/quota",
+      { headers: { "cf-connecting-ip": "198.51.100.20", ...bundleHeaders(CLIENT_A) } },
+      built.env,
+    );
+    expect(((await otherIp.json()) as { used_today: number; tier: string }).used_today).toBe(2);
+
+    const other = await post(built, "/v1/score", microBody, bundleHeaders(CLIENT_B));
+    expect(other.status).toBe(200);
+    expect(((await other.json()) as { quota: { remaining_today: number } }).quota.remaining_today).toBe(4);
+
+    const anonClient = await post(built, "/v1/score", microBody, bundleHeaders(CLIENT_ANON));
+    expect(anonClient.status).toBe(200);
+    expect(((await anonClient.json()) as { quota: { daily_limit: number; remaining_today: number } }).quota).toMatchObject({
+      daily_limit: 5,
+      remaining_today: 4,
+    });
+
+    const longClient = "d".repeat(160);
+    const longFirst = await post(built, "/v1/score", microBody, bundleHeaders(longClient));
+    expect(((await longFirst.json()) as { quota: { remaining_today: number } }).quota.remaining_today).toBe(4);
+    const longPrefix = await post(built, "/v1/score", microBody, bundleHeaders("d".repeat(128)));
+    expect(((await longPrefix.json()) as { quota: { remaining_today: number } }).quota.remaining_today).toBe(3);
+
+    const anonQuota = await built.app.request(
+      "/v1/quota",
+      { headers: { "cf-connecting-ip": "203.0.113.10" } },
+      built.env,
+    );
+    const anonBody = (await anonQuota.json()) as { subject: string; tier: string; used_today: number; daily_limit: number };
+    expect(anonBody.subject).toBe("anonymous");
+    expect(anonBody.tier).toBe("anonymous");
+    expect(anonBody.daily_limit).toBe(100);
+    expect(anonBody.used_today).toBe(0);
+
+    const badClient = await post(built, "/v1/score", microBody, bundleHeaders("not-a-client-id"));
+    expect(badClient.status).toBe(200);
+    expect(((await badClient.json()) as { quota: { daily_limit: number; remaining_today: number } }).quota).toMatchObject({
+      daily_limit: 100,
+      remaining_today: 99,
+    });
+
+    const quota = await built.app.request(
+      "/v1/quota",
+      { headers: { "cf-connecting-ip": "203.0.113.10", ...bundleHeaders(CLIENT_A) } },
+      built.env,
+    );
+    const quotaBody = (await quota.json()) as {
+      subject: string;
+      tier: string;
+      key_id: string | null;
+      daily_limit: number;
+      used_today: number;
+      remaining_today: number;
+    };
+    expect(quota.status).toBe(200);
+    expect(quotaBody.subject).toBe("bundle");
+    expect(quotaBody.tier).toBe("bundle");
+    expect(quotaBody.key_id).toBeNull();
+    expect(quotaBody.daily_limit).toBe(5);
+    expect(quotaBody.used_today).toBe(2);
+    expect(quotaBody.remaining_today).toBe(3);
+
+    const minted = await post(built, "/v1/keys", { label: "direct" });
+    const key = (await minted.json()) as { api_key: string };
+    const keyed = await post(built, "/v1/score", microBody, {
+      authorization: `Bearer ${key.api_key}`,
+      ...bundleHeaders(CLIENT_A),
+    });
+    const keyedBody = (await keyed.json()) as { quota: { daily_limit: number; remaining_today: number } };
+    expect(keyed.status).toBe(200);
+    expect(keyedBody.quota.daily_limit).toBe(5);
+    expect(keyedBody.quota.remaining_today).toBe(4);
+
+    const bundleAfterKey = await built.app.request(
+      "/v1/quota",
+      { headers: { "cf-connecting-ip": "203.0.113.10", ...bundleHeaders(CLIENT_A) } },
+      built.env,
+    );
+    expect(((await bundleAfterKey.json()) as { used_today: number; tier: string }).used_today).toBe(2);
+
+    const mcp = await post(built, "/mcp", {
+      jsonrpc: "2.0",
+      id: 9,
+      method: "tools/call",
+      params: { name: "score_spend", arguments: microBody },
+    }, bundleHeaders(CLIENT_B));
+    const mcpBody = JSON.parse(((await mcp.json()) as { result: { content: Array<{ text: string }> } }).result.content[0]!.text) as {
+      quota: { remaining_today: number };
+    };
+    expect(mcpBody.quota.remaining_today).toBe(3);
+  });
+
+  it("keeps the anonymous bucket when the secret does not match", async () => {
+    const built = appFor({ BUNDLE_PROXY_SECRET: BUNDLE_SECRET, ANON_DAILY_LIMIT: "100", KEY_DAILY_LIMIT: "5" });
+    const wrong = await post(built, "/v1/score", microBody, bundleHeaders(CLIENT_A, "not-the-secret"));
+    expect(wrong.status).toBe(200);
+    const wrongBody = (await wrong.json()) as { quota: { daily_limit: number; remaining_today: number } };
+    expect(wrongBody.quota.daily_limit).toBe(100);
+    expect(wrongBody.quota.remaining_today).toBe(99);
+
+    const otherClient = await post(built, "/v1/score", microBody, bundleHeaders(CLIENT_B, "not-the-secret"));
+    expect(((await otherClient.json()) as { quota: { remaining_today: number } }).quota.remaining_today).toBe(98);
+
+    const bare = await post(built, "/v1/score", microBody);
+    expect(((await bare.json()) as { quota: { remaining_today: number; daily_limit: number } }).quota).toMatchObject({
+      daily_limit: 100,
+      remaining_today: 97,
+    });
+  });
+
+  it("keeps anonymous and API-key behavior when the bundle secret is absent", async () => {
+    const configured = appFor({ BUNDLE_PROXY_SECRET: BUNDLE_SECRET });
+    const noHeaders = await post(configured, "/v1/score", microBody);
+    expect(noHeaders.status).toBe(200);
+    expect(((await noHeaders.json()) as { quota: { daily_limit: number; remaining_today: number } }).quota).toMatchObject({
+      daily_limit: 100,
+      remaining_today: 99,
+    });
+
+    const clientOnly = await post(configured, "/v1/score", microBody, { "x-tw-bundle-client": CLIENT_A });
+    expect(((await clientOnly.json()) as { quota: { daily_limit: number; remaining_today: number } }).quota).toMatchObject({
+      daily_limit: 100,
+      remaining_today: 98,
+    });
+
+    const unset = appFor();
+    const ignored = await post(unset, "/v1/score", microBody, bundleHeaders(CLIENT_A));
+    expect(ignored.status).toBe(200);
+    expect(((await ignored.json()) as { quota: { daily_limit: number; remaining_today: number } }).quota).toMatchObject({
+      daily_limit: 100,
+      remaining_today: 99,
+    });
+
+    const minted = await post(unset, "/v1/keys", { label: "still-works" });
+    const key = (await minted.json()) as { api_key: string; daily_limit: number };
+    expect(key.api_key.startsWith("sg_live_")).toBe(true);
+    expect(key.daily_limit).toBe(1000);
+    const scored = await post(unset, "/v1/score", microBody, { authorization: `Bearer ${key.api_key}` });
+    expect(((await scored.json()) as { quota: { daily_limit: number; remaining_today: number } }).quota).toMatchObject({
+      daily_limit: 1000,
+      remaining_today: 999,
+    });
+  });
+
+  it("still returns 402 on the bundle cap and mints keys per bundle client", async () => {
+    const built = appFor({
+      BUNDLE_PROXY_SECRET: BUNDLE_SECRET,
+      ANON_DAILY_LIMIT: "100",
+      KEY_DAILY_LIMIT: "1",
+      KEYS_PER_DAY: "1",
+    });
+    expect((await post(built, "/v1/score", microBody, bundleHeaders(CLIENT_A))).status).toBe(200);
+    const blocked = await post(built, "/v1/score", microBody, bundleHeaders(CLIENT_A));
+    expect(blocked.status).toBe(402);
+    expect(((await blocked.json()) as { error: { code: string } }).error.code).toBe("payment_not_configured");
+
+    const other = await post(built, "/v1/score", microBody, bundleHeaders(CLIENT_B));
+    expect(other.status).toBe(200);
+
+    const anon = await post(built, "/v1/score", microBody);
+    expect(((await anon.json()) as { quota: { remaining_today: number; daily_limit: number } }).quota).toMatchObject({
+      daily_limit: 100,
+      remaining_today: 99,
+    });
+
+    const firstKey = await post(built, "/v1/keys", { label: "a" }, bundleHeaders(CLIENT_A));
+    expect(firstKey.status).toBe(201);
+    const secondSame = await post(built, "/v1/keys", { label: "a2" }, bundleHeaders(CLIENT_A));
+    expect(secondSame.status).toBe(429);
+    const otherClient = await post(built, "/v1/keys", { label: "b" }, bundleHeaders(CLIENT_B));
+    expect(otherClient.status).toBe(201);
+  });
+});
