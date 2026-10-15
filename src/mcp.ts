@@ -176,7 +176,13 @@ export function handleMcpMessage(
       body: rpcResult(id, {
         protocolVersion: version,
         capabilities: { tools: { listChanged: false } },
-        serverInfo: { name: SERVER_INFO.name, version: SERVER_INFO.version },
+        serverInfo: {
+          name: SERVER_INFO.name,
+          title: SERVER_INFO.title,
+          version: SERVER_INFO.version,
+          description:
+            "Score a planned spend before an agent pays. Verdicts: approve, ask_human, or block.",
+        },
         instructions: INSTRUCTIONS,
       }),
     };
