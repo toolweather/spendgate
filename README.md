@@ -1,5 +1,7 @@
 # SpendGate
 
+[![Listed on mcpservers.org](https://mcpservers.org/badge.svg)](https://mcpservers.org/servers/toolweather/spendgate)
+
 SpendGate helps an autonomous agent decide whether to approve a planned spend **before** it pays.
 
 It returns a score from 0 to 100, a verdict of `approve`, `ask_human`, or `block`, short reasons, a `recommended_action`, and `checked_at`. The score is deterministic. Rewording the purpose will not fish for a better verdict.
