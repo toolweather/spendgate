@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SpendGate — check the spend before the agent pays</title>
+  <meta name="description" content="SpendGate scores a planned payment for autonomous agents and returns approve, ask a human, or block.">
+  <meta name="theme-color" content="#12140f">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <a class="brand" href="/"><span class="mark" aria-hidden="true"></span><strong>SpendGate</strong></a>
+      <nav>
+        <a href="/" aria-current="page">Check</a>
+        <a href="/pricing">Pricing</a>
+        <a href="/terms">Terms</a>
+        <a href="/privacy">Privacy</a>
+      </nav>
+    </header>
+
+    <section class="hero">
+      <div>
+        <div class="kicker">For agents that can pay</div>
+        <h1>Check the spend before the agent pays.</h1>
+        <p class="lede">SpendGate scores a planned payment and returns a verdict: approve, ask a human, or block. It does not hold funds and it does not pay the merchant. Your agent still decides whether to send the money.</p>
+      </div>
+      <div class="verdicts">
+        <div class="chip approve"><b>approve</b><span>Pay. The plan fits policy.</span></div>
+        <div class="chip ask"><b>ask_human</b><span>Stop. A person should confirm.</span></div>
+        <div class="chip block"><b>block</b><span>Do not pay.</span></div>
+      </div>
+    </section>
+
+    <section>
+      <div class="grid">
+        <form id="try" class="panel">
+          <h2>Try a score</h2>
+          <p class="muted">This uses the free tier. Nothing is charged from the browser.</p>
+          <div class="row" style="margin-bottom: 0.9rem">
+            <button type="button" class="ghost" data-preset="micro">Micro check</button>
+            <button type="button" class="ghost" data-preset="saas">SaaS seat</button>
+            <button type="button" class="ghost" data-preset="gift">Gift card</button>
+            <button type="button" class="ghost" data-preset="budget">Over budget</button>
+          </div>
+          <div class="fields">
+            <div>
+              <label for="amount">Amount (USD)</label>
+              <input id="amount" name="amount" type="number" min="0" step="0.01" value="25" required>
+            </div>
+            <div>
+              <label for="currency">Currency</label>
+              <select id="currency" name="currency">
+                <option>USDC</option>
+                <option>USD</option>
+                <option>USDT</option>
+                <option>ETH</option>
+              </select>
+            </div>
+            <div>
+              <label for="category">Category</label>
+              <select id="category" name="category">
+                <option value="status_check">status_check</option>
+                <option value="api_call">api_call</option>
+                <option value="saas" selected>saas</option>
+                <option value="infra">infra</option>
+                <option value="gift_card">gift_card</option>
+                <option value="crypto_transfer">crypto_transfer</option>
+                <option value="irreversible">irreversible</option>
+              </select>
+            </div>
+            <div>
+              <label for="agent_id">Agent id</label>
+              <input id="agent_id" name="agent_id" value="site_demo">
+            </div>
+            <div class="span-2">
+              <label for="merchant">Merchant or endpoint</label>
+              <input id="merchant" name="merchant" value="https://api.openai.com/v1">
+            </div>
+            <div>
+              <label for="daily">Daily budget left (optional)</label>
+              <input id="daily" name="daily_budget_remaining" type="number" min="0" step="0.01" placeholder="40">
+            </div>
+            <div>
+              <label for="monthly">Monthly budget left (optional)</label>
+              <input id="monthly" name="monthly_budget_remaining" type="number" min="0" step="0.01">
+            </div>
+          </div>
+          <div class="checks">
+            <label><input type="checkbox" name="hint" value="new_payee"> new payee</label>
+            <label><input type="checkbox" name="hint" value="high_velocity"> high velocity</label>
+            <label><input type="checkbox" name="hint" value="known_merchant"> known merchant</label>
+            <label><input type="checkbox" name="hint" value="within_policy"> within policy</label>
+          </div>
+          <button type="submit">Score this spend</button>
+        </form>
+        <div class="panel result" id="result">
+          <div class="example-tag">Example</div>
+          <div class="scoreline">
+            <div class="num">53</div>
+            <div class="pill ask_human">ask_human</div>
+          </div>
+          <p>Do not pay yet. Ask a human to confirm this spend.</p>
+          <ul class="reasons">
+            <li>A $25 SaaS charge at a known API is inside the middle band.</li>
+            <li>Submit the form to replace this example with a live verdict.</li>
+          </ul>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>How v1 decides</h2>
+      <div class="rules">
+        <div class="rule">
+          <h3>Higher spend, lower score</h3>
+          <p>The amount penalty is <span class="mono">min(75, round(25 × log10(1 + usd)))</span>. A missing or unknown merchant lowers the score further. Known hosts are listed on <a href="/v1/policy">/v1/policy</a>.</p>
+        </div>
+        <div class="rule">
+          <h3>Category risk</h3>
+          <p>crypto_transfer, irreversible, and gift_card are high. api_call, saas, and infra are medium. status_check is low. Anything else is unknown.</p>
+        </div>
+        <div class="rule">
+          <h3>Two hard rules</h3>
+          <p>Over a budget you pass in, the verdict is block. Strictly under $<span data-policy="micro_threshold_usd">1</span>, it is approve, unless that budget rule fires first.</p>
+        </div>
+      </div>
+    </section>
+
+    <section>
+      <h2>Call it from an agent</h2>
+      <pre><code>curl -s $ORIGIN/v1/score \
+  -H 'content-type: application/json' \
+  -d '{"amount":12,"currency":"USDC","category":"api_call","merchant":"https://api.openai.com","agent_id":"planner"}'</code></pre>
+      <p class="muted">MCP tools <span class="mono">score_spend</span>, <span class="mono">get_quota</span>, and <span class="mono">get_api_key</span> live at <a href="/.well-known/mcp">/.well-known/mcp</a>. Agent notes are in <a href="/llms.txt">llms.txt</a>.</p>
+    </section>
+
+    <footer>
+      <span>Advisory scores only. SpendGate does not send the payment.</span>
+      <span><a href="/pricing">Pricing</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></span>
+    </footer>
+  </div>
+  <script src="/site.js"></script>
+  <script>
+    document.querySelector("pre code").textContent =
+      document.querySelector("pre code").textContent.replace("$ORIGIN", location.origin);
+  </script>
+</body>
+</html>

@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Pricing — SpendGate</title>
+  <meta name="theme-color" content="#12140f">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <a class="brand" href="/"><span class="mark" aria-hidden="true"></span><strong>SpendGate</strong></a>
+      <nav>
+        <a href="/">Check</a>
+        <a href="/pricing" aria-current="page">Pricing</a>
+        <a href="/terms">Terms</a>
+        <a href="/privacy">Privacy</a>
+      </nav>
+    </header>
+
+    <div class="prose">
+      <div class="kicker">Pricing</div>
+      <h1>Free to start. A tenth of a cent after that.</h1>
+      <p class="lede">You pay SpendGate for the score, not for the merchant charge the agent is considering. Quota resets at 00:00 UTC.</p>
+    </div>
+
+    <section>
+      <div class="cards">
+        <article class="card">
+          <h3>Anonymous</h3>
+          <div class="price"><span data-policy="anonymous_daily_limit">100</span> / day</div>
+          <p>No key. Call <span class="mono">POST /v1/score</span>. Enough for a planner that checks the occasional spend.</p>
+        </article>
+        <article class="card">
+          <h3>Free key</h3>
+          <div class="price"><span data-policy="free_key_daily_limit">1000</span> / day</div>
+          <p>Self-serve <span class="mono">POST /v1/keys</span>. The secret is shown once. Up to <span data-policy="keys_per_day">20</span> mints per client per day.</p>
+        </article>
+        <article class="card">
+          <h3>Overage</h3>
+          <div class="price">$<span data-policy="price_usd">0.001</span></div>
+          <p>USDC on Base (<span class="mono" data-policy="network">eip155:8453</span>) through the PayAI facilitator, using x402. One payment, one score.</p>
+        </article>
+      </div>
+    </section>
+
+    <div class="prose">
+      <h2>What is not billed</h2>
+      <p>Quota reads, key mints, the policy document, OpenAPI, MCP discovery, and this site. Free spend watches are not in v1. They may come later, and they would stay optional.</p>
+      <h2>When the cap is used up</h2>
+      <p>The next score returns HTTP 402 and a <span class="mono">PAYMENT-REQUIRED</span> header. The agent signs an EIP-3009 authorization for the listed amount and retries with <span class="mono">PAYMENT-SIGNATURE</span>. If this deployment has no <span class="mono">PAY_TO</span> wallet set, the response says payment is not configured. It will not invent an address.</p>
+      <p>Asset: Base USDC <span class="mono">0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913</span>. Facilitator: <a href="https://facilitator.payai.network">facilitator.payai.network</a>.</p>
+      <p><a href="/">Try a free score</a></p>
+    </div>
+
+    <footer>
+      <span>Prices are for the score call.</span>
+      <span><a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></span>
+    </footer>
+  </div>
+  <script src="/site.js"></script>
+</body>
+</html>

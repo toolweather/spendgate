@@ -1,0 +1,43 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Terms — SpendGate</title>
+  <meta name="theme-color" content="#12140f">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <a class="brand" href="/"><span class="mark" aria-hidden="true"></span><strong>SpendGate</strong></a>
+      <nav>
+        <a href="/">Check</a>
+        <a href="/pricing">Pricing</a>
+        <a href="/terms" aria-current="page">Terms</a>
+        <a href="/privacy">Privacy</a>
+      </nav>
+    </header>
+    <article class="prose">
+      <div class="kicker">Terms</div>
+      <h1>Advisory, and only for the score.</h1>
+      <p>These terms cover the SpendGate software as deployed by whoever runs this Worker. They are a plain-language stub, not a negotiated contract.</p>
+      <h2>What you get</h2>
+      <p>A deterministic score and a verdict: approve, ask_human, or block. That is decision support for an agent. It is not a payment, not custody, not insurance, and not a promise that a merchant, chain, or counterparty will behave.</p>
+      <h2>What you still do</h2>
+      <p>You choose whether to pay. If the verdict is ask_human, stop and ask a person. If it is block, do not pay. Passing <span class="mono">known_merchant</span> or <span class="mono">human_preapproved</span> is your claim. SpendGate does not verify it.</p>
+      <h2>Paid calls</h2>
+      <p>After the free daily cap, a score can require a USDC payment on Base via x402. That payment is for the score request. It is separate from any amount you later send to a merchant. Settlement is handled by the PayAI facilitator configured for this deployment. If <span class="mono">PAY_TO</span> is unset, paid scores are refused.</p>
+      <h2>No warranty</h2>
+      <p>The service is provided as available, on a free Cloudflare plan unless the operator upgrades it. Scoring rules can change with the policy version. Do not rely on SpendGate as your only budget control. Keep a hard cap in the agent.</p>
+      <h2>Acceptable use</h2>
+      <p>Do not use the API to probe for a way around your own limits, to harass the facilitator, or to move money you are not allowed to move. Sanctions and fraud screening are not part of v1. That responsibility stays with the caller.</p>
+    </article>
+    <footer>
+      <span>Last updated 15 October 2026.</span>
+      <span><a href="/privacy">Privacy</a></span>
+    </footer>
+  </div>
+</body>
+</html>

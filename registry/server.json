@@ -1,0 +1,26 @@
+{
+  "$schema": "https://static.modelcontextprotocol.io/schemas/2025-12-11/server.schema.json",
+  "name": "io.github.toolweather/spendgate",
+  "title": "SpendGate",
+  "description": "Score a planned spend before an agent pays. Verdicts: approve, ask_human, or block.",
+  "repository": {
+    "url": "https://github.com/toolweather/spendgate",
+    "source": "github"
+  },
+  "websiteUrl": "https://spendgate.toolweather.workers.dev",
+  "version": "1.0.0",
+  "remotes": [
+    {
+      "type": "streamable-http",
+      "url": "https://spendgate.toolweather.workers.dev/mcp",
+      "headers": [
+        {
+          "name": "Authorization",
+          "description": "Optional Bearer sg_live_… free key (POST https://spendgate.toolweather.workers.dev/v1/keys) for 1,000 free scores/day; 100/day without one. After the cap, x402 USDC on Base.",
+          "isRequired": false,
+          "isSecret": true
+        }
+      ]
+    }
+  ]
+}

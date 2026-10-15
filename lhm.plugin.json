@@ -1,0 +1,144 @@
+{
+  "identifier": "toolweather-spendgate",
+  "name": "SpendGate",
+  "version": "1.0.0",
+  "description": "Score a planned spend before an agent pays. Verdicts: approve, ask_human, or block.",
+  "author": "toolweather",
+  "authorUrl": "https://github.com/toolweather",
+  "category": "developer",
+  "tags": [
+    "payments",
+    "agents",
+    "risk",
+    "x402",
+    "budget"
+  ],
+  "homepage": "https://github.com/toolweather/spendgate",
+  "cloudEndpoint": "https://spendgate.toolweather.workers.dev/mcp",
+  "tools": [
+    {
+      "name": "score_spend",
+      "title": "Score a planned spend before paying",
+      "description": "Score a planned payment before sending it. Call this before any tool that transfers crypto, buys a gift card, starts a subscription, or pays an API or merchant. Pass amount in USD, category, merchant or endpoint URL, and any budget remaining. Returns score 0-100, verdict approve | ask_human | block, reasons, and recommended_action. Free within the daily quota, then $0.001 via x402.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "amount": {
+            "type": "number",
+            "description": "Planned spend in USD, not in token atomic units.",
+            "examples": [
+              0.2,
+              25,
+              40
+            ]
+          },
+          "currency": {
+            "type": "string",
+            "description": "Payment currency. Defaults to USDC."
+          },
+          "category": {
+            "type": "string",
+            "description": "One of status_check, api_call, saas, infra, gift_card, crypto_transfer, irreversible. Unknown categories are scored as unknown risk.",
+            "examples": [
+              "status_check",
+              "gift_card",
+              "api_call"
+            ]
+          },
+          "purpose": {
+            "type": "string",
+            "description": "Short human description. Used as the category when category is omitted."
+          },
+          "merchant": {
+            "type": "string",
+            "description": "Merchant name or https endpoint URL that will receive the spend.",
+            "examples": [
+              "https://api.openai.com/v1"
+            ]
+          },
+          "endpoint": {
+            "type": "string",
+            "description": "Alias of merchant when the payee is an API URL."
+          },
+          "agent_id": {
+            "type": "string",
+            "description": "Your agent or key id. Echoed, not scored in v1."
+          },
+          "api_key": {
+            "type": "string",
+            "description": "Optional SpendGate key (sg_live_\u2026). Anonymous callers share a smaller daily cap."
+          },
+          "daily_budget_remaining": {
+            "type": "number",
+            "description": "USD still available today. Amount above this is blocked."
+          },
+          "monthly_budget_remaining": {
+            "type": "number",
+            "description": "USD still available this month. Amount above this is blocked."
+          },
+          "risk_hints": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "Self-reported hints. Raising: new_payee, new_merchant, first_payment, high_velocity, mismatched_purpose, off_platform, shared_wallet. Lowering: trusted_repeat, within_policy, human_preapproved. known_merchant marks the payee known."
+          }
+        },
+        "required": [
+          "amount"
+        ]
+      },
+      "annotations": {
+        "title": "Score planned spend",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": true
+      }
+    },
+    {
+      "name": "get_quota",
+      "title": "Free scores remaining today",
+      "description": "Read how many free SpendGate scores remain today for this anonymous caller or API key. Does not consume a score and is not billed. Free.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "api_key": {
+            "type": "string",
+            "description": "Optional sg_live_ key. Omit to read the anonymous quota for this client."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Get quota",
+        "readOnlyHint": true,
+        "destructiveHint": false,
+        "idempotentHint": true,
+        "openWorldHint": false
+      }
+    },
+    {
+      "name": "get_api_key",
+      "title": "Get a free SpendGate API key",
+      "description": "Mint a free SpendGate API key. The secret is returned once. Store it and send it as Authorization: Bearer, or as api_key on later score_spend calls. Do not call this on every turn. Free.",
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string",
+            "description": "Optional label stored with the key, up to 80 characters."
+          }
+        }
+      },
+      "annotations": {
+        "title": "Get free API key",
+        "readOnlyHint": false,
+        "destructiveHint": false,
+        "idempotentHint": false,
+        "openWorldHint": false
+      }
+    }
+  ],
+  "resources": [],
+  "prompts": []
+}

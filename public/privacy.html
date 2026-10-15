@@ -1,0 +1,41 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Privacy — SpendGate</title>
+  <meta name="theme-color" content="#12140f">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <a class="brand" href="/"><span class="mark" aria-hidden="true"></span><strong>SpendGate</strong></a>
+      <nav>
+        <a href="/">Check</a>
+        <a href="/pricing">Pricing</a>
+        <a href="/terms">Terms</a>
+        <a href="/privacy" aria-current="page">Privacy</a>
+      </nav>
+    </header>
+    <article class="prose">
+      <div class="kicker">Privacy</div>
+      <h1>What this server stores.</h1>
+      <p>SpendGate does not phone home. The operator of this deployment is the party that holds the database. The software itself has no analytics account and no third-party tracker on the site.</p>
+      <h2>Scores</h2>
+      <p>v1 does not keep the spend body. A score is computed and returned. Quota is a counter: how many free scores and how many paid scores ran today for a subject. The anonymous subject is a hash of the UTC date and the client IP, so the raw IP is not written down and the hash changes the next day.</p>
+      <h2>API keys</h2>
+      <p>A free key is shown once. The database stores a SHA-256 hash, a short prefix, an optional label, the daily limit, and the time it was minted. Losing the secret means minting another key.</p>
+      <h2>Payments</h2>
+      <p>If you pay for an overage score, the server sends the signed x402 payload to the PayAI facilitator at <span class="mono">https://facilitator.payai.network</span> so it can verify and settle. SpendGate then stores the payment nonce, payer address, transaction hash, amount, and the score JSON so the same nonce can be replayed without paying twice.</p>
+      <h2>What we do not want</h2>
+      <p>Do not send secrets, credentials, or full customer records in the purpose field. The purpose is only a label for the risk band when you omit category.</p>
+    </article>
+    <footer>
+      <span>Last updated 15 October 2026.</span>
+      <span><a href="/terms">Terms</a></span>
+    </footer>
+  </div>
+</body>
+</html>

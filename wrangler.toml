@@ -1,0 +1,39 @@
+name = "spendgate"
+main = "src/index.ts"
+compatibility_date = "2025-04-01"
+compatibility_flags = ["nodejs_compat"]
+workers_dev = true
+account_id = "9c9d3ecdf6a4b87be13756af2efadcce"
+
+# The site in public/ ships with the Worker as static assets.
+# That is the free-plan way to serve the Pages content and the API together.
+# A split host can still run: npx wrangler pages deploy public
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+not_found_handling = "404-page"
+
+[[d1_databases]]
+binding = "DB"
+database_name = "spendgate"
+# Placeholder. Replace after `npx wrangler d1 create spendgate`.
+database_id = "55c80bac-8f11-4ca4-8611-3048fd6e9457"
+migrations_dir = "migrations"
+
+[vars]
+FACILITATOR_URL = "https://facilitator.payai.network"
+NETWORK = "eip155:8453"
+ASSET = "0x833589fCD6eDb6E08f4c7C32D4f71b54bdA02913"
+ASSET_NAME = "USD Coin"
+ASSET_VERSION = "2"
+# 0.001 USDC, 6 decimals.
+PRICE_ATOMIC = "1000"
+ANON_DAILY_LIMIT = "100"
+KEY_DAILY_LIMIT = "1000"
+KEYS_PER_DAY = "20"
+MICRO_THRESHOLD_USD = "1"
+
+# PAY_TO is intentionally not set here. Put the receiving wallet in a secret
+# or in .dev.vars locally. Do not commit a real address.
+#   npx wrangler secret put PAY_TO
