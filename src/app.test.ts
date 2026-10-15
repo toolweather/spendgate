@@ -320,6 +320,82 @@ function bundleHeaders(client: string, secret: string = BUNDLE_SECRET): Record<s
 }
 
 describe("Toolweather bundle proxy headers", () => {
+  it("caps anon: bundle clients at the anonymous daily limit and hex clients at the free-key limit", async () => {
+    const built = appFor({ BUNDLE_PROXY_SECRET: BUNDLE_SECRET });
+
+    const anon = await post(built, "/v1/score", microBody, bundleHeaders(CLIENT_ANON));
+    expect(anon.status).toBe(200);
+    expect(((await anon.json()) as { quota: { daily_limit: number; remaining_today: number } }).quota).toMatchObject({
+      daily_limit: 100,
+      remaining_today: 99,
+    });
+
+    const anonQuota = await built.app.request(
+      "/v1/quota",
+      { headers: { "cf-connecting-ip": "198.51.100.8", ...bundleHeaders(`ANON:${"c".repeat(24)}`) } },
+      built.env,
+    );
+    const anonQuotaBody = (await anonQuota.json()) as {
+      subject: string;
+      tier: string;
+      daily_limit: number;
+      used_today: number;
+      remaining_today: number;
+    };
+    expect(anonQuotaBody.subject).toBe("bundle");
+    expect(anonQuotaBody.tier).toBe("bundle");
+    expect(anonQuotaBody.daily_limit).toBe(100);
+    expect(anonQuotaBody.used_today).toBe(1);
+    expect(anonQuotaBody.remaining_today).toBe(99);
+
+    const otherAnon = await post(built, "/v1/score", microBody, bundleHeaders(`anon:${"e".repeat(24)}`));
+    expect(((await otherAnon.json()) as { quota: { daily_limit: number; remaining_today: number } }).quota).toMatchObject({
+      daily_limit: 100,
+      remaining_today: 99,
+    });
+
+    const hex = await post(built, "/v1/score", microBody, bundleHeaders(CLIENT_A));
+    expect(hex.status).toBe(200);
+    expect(((await hex.json()) as { quota: { daily_limit: number; remaining_today: number } }).quota).toMatchObject({
+      daily_limit: 1000,
+      remaining_today: 999,
+    });
+
+    const hexQuota = await built.app.request(
+      "/v1/quota",
+      { headers: { "cf-connecting-ip": "198.51.100.9", ...bundleHeaders(CLIENT_A) } },
+      built.env,
+    );
+    expect((await hexQuota.json()) as { subject: string; tier: string; daily_limit: number; used_today: number }).toMatchObject({
+      subject: "bundle",
+      tier: "bundle",
+      daily_limit: 1000,
+      used_today: 1,
+    });
+
+    const wrong = await post(built, "/v1/score", microBody, bundleHeaders(CLIENT_ANON, "not-the-secret"));
+    expect(wrong.status).toBe(200);
+    expect(((await wrong.json()) as { quota: { daily_limit: number; remaining_today: number } }).quota).toMatchObject({
+      daily_limit: 100,
+      remaining_today: 99,
+    });
+
+    const wrongOtherClient = await post(built, "/v1/score", microBody, bundleHeaders(CLIENT_A, "not-the-secret"));
+    expect(((await wrongOtherClient.json()) as { quota: { remaining_today: number } }).quota.remaining_today).toBe(98);
+
+    const wrongQuota = await built.app.request(
+      "/v1/quota",
+      { headers: { "cf-connecting-ip": "203.0.113.10", ...bundleHeaders(CLIENT_A, "not-the-secret") } },
+      built.env,
+    );
+    expect((await wrongQuota.json()) as { subject: string; tier: string; daily_limit: number; used_today: number }).toMatchObject({
+      subject: "anonymous",
+      tier: "anonymous",
+      daily_limit: 100,
+      used_today: 2,
+    });
+  });
+
   it("attributes free-key quota to the bundle client when the secret matches", async () => {
     const built = appFor({ BUNDLE_PROXY_SECRET: BUNDLE_SECRET, ANON_DAILY_LIMIT: "100", KEY_DAILY_LIMIT: "5" });
 
@@ -348,8 +424,8 @@ describe("Toolweather bundle proxy headers", () => {
     const anonClient = await post(built, "/v1/score", microBody, bundleHeaders(CLIENT_ANON));
     expect(anonClient.status).toBe(200);
     expect(((await anonClient.json()) as { quota: { daily_limit: number; remaining_today: number } }).quota).toMatchObject({
-      daily_limit: 5,
-      remaining_today: 4,
+      daily_limit: 100,
+      remaining_today: 99,
     });
 
     const longClient = "d".repeat(160);

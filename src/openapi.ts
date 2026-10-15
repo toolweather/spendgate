@@ -46,7 +46,7 @@ export function openApiDocument(origin: string, config: Config) {
               required: false,
               schema: { type: "string" },
               description:
-                "Toolweather suite proxy secret. When it matches BUNDLE_PROXY_SECRET, free quota is charged to X-Tw-Bundle-Client. A missing or wrong value keeps anonymous or API-key behavior.",
+                "Toolweather suite proxy secret. When it matches BUNDLE_PROXY_SECRET, free quota is charged to X-Tw-Bundle-Client: the free-key daily cap for a hex client, the anonymous daily cap for an anon: client. A missing or wrong value keeps anonymous or API-key behavior.",
             },
             {
               name: "X-Tw-Bundle-Client",
@@ -54,7 +54,7 @@ export function openApiDocument(origin: string, config: Config) {
               required: false,
               schema: { type: "string" },
               description:
-                "Client id for bundle quota. 16–128 hex characters, or anon: plus that hash. Longer values use a stable prefix. Ignored unless X-Tw-Bundle-Secret matches.",
+                "Client id for bundle quota. A hex id (16–128 characters; longer values use a stable prefix) uses the free-key daily cap. An anon: id uses the anonymous daily cap. Ignored unless X-Tw-Bundle-Secret matches.",
             },
             {
               name: "PAYMENT-SIGNATURE",

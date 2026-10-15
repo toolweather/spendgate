@@ -192,7 +192,7 @@ async function bundleIdentity(
   day: string,
   bundleSecret: string | null | undefined,
   bundleClient: string | null | undefined,
-): Promise<{ subject: string; ownerHint: string } | null> {
+): Promise<{ subject: string; ownerHint: string; limit: number } | null> {
   const expected = config.bundleProxySecret;
   if (!expected || !bundleSecret || !secretsEqual(expected, bundleSecret)) return null;
   const clientId = bundleClientId(bundleClient);
@@ -200,6 +200,8 @@ async function bundleIdentity(
   return {
     subject: `bundle:${await sha256Hex(`spendgate-bundle-v1:${day}:${clientId}`)}`,
     ownerHint: await sha256Hex(`spendgate-owner-v1:${day}:bundle:${clientId}`),
+    // `anon:` ids rotate with egress. They use the anonymous cap, not a fresh key bucket.
+    limit: clientId.startsWith("anon:") ? config.anonDailyLimit : config.keyDailyLimit,
   };
 }
 
@@ -234,7 +236,7 @@ export async function resolveAuth(args: {
         ok: true,
         auth: {
           subject: bundled.subject,
-          limit: args.config.keyDailyLimit,
+          limit: bundled.limit,
           key: null,
           ownerHint: bundled.ownerHint,
           plan: "bundle",
