@@ -189,6 +189,14 @@ footer {
 }
 .prose { max-width: 44rem; padding-top: 1.5rem; }
 .prose h2 { margin-top: 1.6rem; }
+.hp {
+  position: absolute;
+  left: -10000px;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+}
+#waitlist input[type="email"] { margin-bottom: 0.2rem; }
 
 @media (max-width: 800px) {
   .hero, .grid, .rules, .cards, .fields { grid-template-columns: 1fr; }

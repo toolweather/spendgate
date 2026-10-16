@@ -30,6 +30,7 @@ Do not reword purpose and retry to fish for approve. v1 scoring is deterministic
 - After the cap, each score costs ${config.priceUsd} USDC on Base (${config.network}) via x402. Facilitator: ${config.facilitatorUrl}.
 - get_quota, get_api_key, docs, and this file are not billed.
 - Paid calls require PAY_TO on the server. If it is unset, over-cap scores return 402 payment_not_configured and do not invent a wallet.
+- When the free cap is exhausted, the 402 body includes waitlist_url for SpendGate Pro ($19/mo for teams: higher limits, spend policies, and alerts). The x402 PAYMENT-REQUIRED payload is unchanged. Page: ${origin}/pro. Joining does not charge anyone and does not send email.
 
 ## API
 

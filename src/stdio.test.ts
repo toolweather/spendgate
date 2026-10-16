@@ -115,9 +115,12 @@ describe("stdio introspection", () => {
       id: 101,
       method: "tools/call",
       params: { name: "score_spend", arguments: { amount: 0.2, category: "status_check" } },
-    })) as { error?: { code: number; data?: { error?: { code?: string } } } };
+    })) as { error?: { code: number; message?: string; data?: { error?: { code?: string }; waitlist_url?: string } } };
     expect(denied.error?.code).toBe(-32002);
     expect(denied.error?.data?.error?.code).toBe("payment_not_configured");
+    expect(denied.error?.data?.waitlist_url).toBe("https://spendgate.toolweather.workers.dev/pro");
+    expect(denied.error?.message).toContain("https://spendgate.toolweather.workers.dev/pro");
+    expect(denied.error?.message).toContain("$19/mo");
   });
 
   it("reads newline JSON and Content-Length frames", () => {

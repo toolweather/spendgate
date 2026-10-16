@@ -3,6 +3,7 @@ import { encodeBase64Json, randomHex, sha256Hex } from "./crypto.js";
 import { lookupPaycheck, paycheckTarget } from "./paycheck.js";
 import { parseSpendBody, scoreSpend, type ScoreResult } from "./scoring.js";
 import type { StoredKey, UsageStore } from "./store.js";
+import { waitlistPitch, waitlistUrl } from "./waitlist.js";
 import {
   payloadMismatch,
   paymentNonce,
@@ -399,11 +400,12 @@ export async function scoreRequest(args: {
   if (!reserved) {
     if (!args.config.payTo) {
       const quota = await quotaFor(args.store, args.config, auth.auth, args.now);
+      const url = waitlistUrl(args.resourceUrl);
       return errorOutcome(
         402,
         "payment_not_configured",
-        "The free daily cap is exhausted and PAY_TO is not set, so this server cannot accept USDC yet.",
-        { quota: quotaSlice(quota) },
+        `The free daily cap is exhausted and PAY_TO is not set, so this server cannot accept USDC yet. ${waitlistPitch(url)}`,
+        { quota: quotaSlice(quota), waitlist_url: url },
         quotaHeaders(quota),
       );
     }
@@ -418,7 +420,8 @@ export async function scoreRequest(args: {
           ...quotaHeaders(quota),
           "PAYMENT-REQUIRED": paymentRequiredHeader(required),
         },
-        body: { ...required, quota: quotaSlice(quota) },
+        // waitlist_url sits beside quota. It is not part of the x402 header payload.
+        body: { ...required, quota: quotaSlice(quota), waitlist_url: waitlistUrl(args.resourceUrl) },
       };
     }
 

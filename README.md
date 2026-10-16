@@ -115,6 +115,8 @@ curl -s http://127.0.0.1:43123/v1/quota \
 Other routes:
 
 - `GET /health`
+- `POST /v1/waitlist` with `{ "email", "source"? }`. Stores a lowercased address once. No email is sent.
+- `GET /v1/waitlist/count` returns `{ "count" }` and no addresses.
 - `GET /v1/policy`
 - `GET /openapi.json`
 - `GET /llms.txt` and `GET /llms-full.txt`
@@ -137,7 +139,7 @@ curl -s http://127.0.0.1:43123/mcp \
 
 Tools: `score_spend`, `get_quota`, `get_api_key`.
 
-After the free cap, `tools/call` on `score_spend` returns HTTP 402 with a JSON-RPC error (`-32002`) and the `PAYMENT-REQUIRED` header. `get_quota` and `get_api_key` stay free.
+After the free cap, `tools/call` on `score_spend` returns HTTP 402 with a JSON-RPC error (`-32002`) and the `PAYMENT-REQUIRED` header. The error names the SpendGate Pro waitlist (`https://spendgate.toolweather.workers.dev/pro` on this deployment). `waitlist_url` is on the JSON body, not inside the x402 payload. `get_quota` and `get_api_key` stay free.
 
 ## Run locally
 
@@ -174,6 +176,8 @@ npx wrangler secret put PAY_TO
 npx wrangler secret put BUNDLE_PROXY_SECRET
 npx wrangler deploy
 ```
+
+The Pro waitlist page is [https://spendgate.toolweather.workers.dev/pro](https://spendgate.toolweather.workers.dev/pro). The signup count, with no addresses, is `GET https://spendgate.toolweather.workers.dev/v1/waitlist/count`. Apply the remote migration before deploy so `waitlist` exists. Do not put `PAY_TO` or `BUNDLE_PROXY_SECRET` in the repo.
 
 `BUNDLE_PROXY_SECRET` must be the same value as on the Toolweather Worker. Set it after merge, then redeploy. Do not commit the value. Until that secret is set, proxied calls without an `sg_live_…` key keep sharing the anonymous daily bucket. The same secret, when set, also attributes SpendGate's PayCheck lookups to SpendGate's internal bundle client. `PAYCHECK_URL` is already in `[vars]`. `PAYCHECK_API_KEY` is optional (`npx wrangler secret put PAYCHECK_API_KEY`) and is not required for the anonymous PayCheck tier.
 

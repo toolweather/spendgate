@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>SpendGate Pro — $19/mo for teams</title>
+  <meta name="description" content="SpendGate Pro is $19 per month for teams: higher limits, spend policies, and alerts. Join the waitlist. No charge and no email during this test.">
+  <meta name="theme-color" content="#12140f">
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/styles.css">
+</head>
+<body>
+  <div class="wrap">
+    <header class="top">
+      <a class="brand" href="/"><span class="mark" aria-hidden="true"></span><strong>SpendGate</strong></a>
+      <nav>
+        <a href="/">Check</a>
+        <a href="/pricing">Pricing</a>
+        <a href="/pro" aria-current="page">Pro</a>
+        <a href="/terms">Terms</a>
+        <a href="/privacy">Privacy</a>
+      </nav>
+    </header>
+
+    <div class="prose">
+      <div class="kicker">Two-week demand test</div>
+      <h1>$19/mo for teams.</h1>
+      <p class="lede">SpendGate Pro is higher limits, spend policies, and alerts. Joining the waitlist does not charge you and does not send email.</p>
+    </div>
+
+    <section>
+      <div class="cards">
+        <article class="card">
+          <h3>Higher limits</h3>
+          <div class="price">$19/mo</div>
+          <p>More scores per day than the anonymous 100 and the free-key 1,000, for a team whose agents check spends all day.</p>
+        </article>
+        <article class="card">
+          <h3>Spend policies</h3>
+          <div class="price">One policy</div>
+          <p>Budgets, categories, and merchants the team sets, so an agent follows the same rules instead of a hint on each call.</p>
+        </article>
+        <article class="card">
+          <h3>Alerts</h3>
+          <div class="price">On block</div>
+          <p>A note when a score comes back <span class="mono">block</span> or <span class="mono">ask_human</span>, before the agent pays.</p>
+        </article>
+      </div>
+    </section>
+
+    <section>
+      <form id="waitlist" class="panel" action="/v1/waitlist" method="post">
+        <h2>Join the waitlist</h2>
+        <p class="muted">We store the address, lowercase it, and keep one row if you submit it again. No payment and no message during this test.</p>
+        <label for="email">Work email</label>
+        <input id="email" name="email" type="email" autocomplete="email" required maxlength="254" placeholder="you@team.com">
+        <div class="hp" aria-hidden="true">
+          <label for="hp_field">Leave this blank</label>
+          <input id="hp_field" name="hp_field" type="text" tabindex="-1" autocomplete="off">
+        </div>
+        <input type="hidden" name="source" value="pro">
+        <div class="row" style="margin-top: 0.9rem">
+          <button type="submit">Join the waitlist</button>
+        </div>
+        <p id="waitlist-status" class="muted" role="status"></p>
+      </form>
+    </section>
+
+    <footer>
+      <span>Proposed price. Not a charge.</span>
+      <span><a href="/pricing">Pricing</a> · <a href="/terms">Terms</a> · <a href="/privacy">Privacy</a></span>
+    </footer>
+  </div>
+  <script src="/site.js"></script>
+</body>
+</html>

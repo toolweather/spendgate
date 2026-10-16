@@ -1,4 +1,5 @@
 import type { ServiceOutcome } from "./service.js";
+import { waitlistPitch } from "./waitlist.js";
 
 export const MCP_PROTOCOL_VERSIONS = ["2025-03-26", "2025-06-18"] as const;
 
@@ -195,12 +196,20 @@ export interface McpHttpResult {
   headers: Record<string, string>;
 }
 
+function paymentRequiredMessage(body: unknown): string {
+  if (body && typeof body === "object" && "waitlist_url" in body) {
+    const url = (body as { waitlist_url: unknown }).waitlist_url;
+    if (typeof url === "string" && url) return `Payment required. ${waitlistPitch(url)}`;
+  }
+  return "Payment required";
+}
+
 function toolText(outcome: ServiceOutcome): McpHttpResult {
   if (outcome.status === 402) {
     return {
       status: 402,
       headers: outcome.headers,
-      body: rpcError(null, -32002, "Payment required", outcome.body),
+      body: rpcError(null, -32002, paymentRequiredMessage(outcome.body), outcome.body),
     };
   }
   if (outcome.status >= 500) {

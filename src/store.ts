@@ -24,6 +24,17 @@ export interface StoredPayment {
   createdAt: string;
 }
 
+export interface WaitlistSignup {
+  email: string;
+  createdAt: string;
+  source: string | null;
+  /** UTC-day hash of the client address. Not the raw IP. */
+  ipHash: string;
+  ipDailyCap: number;
+}
+
+export type WaitlistJoinResult = "created" | "duplicate" | "rate_limited";
+
 export interface UsageStore {
   getKeyByHash(hash: string): Promise<StoredKey | null>;
   insertKey(row: StoredKey): Promise<void>;
@@ -33,16 +44,31 @@ export interface UsageStore {
   addPaid(subject: string, day: string): Promise<void>;
   getPayment(nonce: string): Promise<StoredPayment | null>;
   recordPayment(row: StoredPayment): Promise<void>;
+  /**
+   * Insert one waitlist row, or insert nothing when the email exists or the
+   * daily IP cap is already full. A created signup is a single write.
+   */
+  joinWaitlist(row: WaitlistSignup): Promise<WaitlistJoinResult>;
+  /** Number of stored addresses. Never returns the addresses. */
+  countWaitlist(): Promise<number>;
 }
 
 function emptyUsage(): UsageSnapshot {
   return { scoreCount: 0, paidCount: 0 };
 }
 
+interface MemoryWaitlistRow {
+  email: string;
+  createdAt: string;
+  source: string | null;
+  ipHash: string;
+}
+
 export class MemoryUsageStore implements UsageStore {
   private keys = new Map<string, StoredKey>();
   private usage = new Map<string, UsageSnapshot>();
   private payments = new Map<string, StoredPayment>();
+  private waitlist = new Map<string, MemoryWaitlistRow>();
 
   async getKeyByHash(hash: string): Promise<StoredKey | null> {
     return this.keys.get(hash) ?? null;
@@ -85,6 +111,26 @@ export class MemoryUsageStore implements UsageStore {
 
   async recordPayment(row: StoredPayment): Promise<void> {
     this.payments.set(row.nonce, row);
+  }
+
+  async joinWaitlist(row: WaitlistSignup): Promise<WaitlistJoinResult> {
+    if (this.waitlist.has(row.email)) return "duplicate";
+    let fromIp = 0;
+    for (const existing of this.waitlist.values()) {
+      if (existing.ipHash === row.ipHash) fromIp += 1;
+    }
+    if (fromIp >= row.ipDailyCap) return "rate_limited";
+    this.waitlist.set(row.email, {
+      email: row.email,
+      createdAt: row.createdAt,
+      source: row.source,
+      ipHash: row.ipHash,
+    });
+    return "created";
+  }
+
+  async countWaitlist(): Promise<number> {
+    return this.waitlist.size;
   }
 }
 
@@ -216,5 +262,30 @@ export class D1UsageStore implements UsageStore {
       )
       .bind(row.nonce, row.subject, row.payer, row.txHash, row.amount, row.responseJson, row.createdAt)
       .run();
+  }
+
+  async joinWaitlist(row: WaitlistSignup): Promise<WaitlistJoinResult> {
+    // One statement: the IP cap is a read inside the insert, and the email
+    // primary key drops a duplicate without a second write.
+    const inserted = await this.db
+      .prepare(
+        `INSERT INTO waitlist (email, created_at, source, ip_hash)
+         SELECT ?, ?, ?, ?
+         WHERE (SELECT COUNT(*) FROM waitlist WHERE ip_hash = ?) < ?
+         ON CONFLICT(email) DO NOTHING`,
+      )
+      .bind(row.email, row.createdAt, row.source, row.ipHash, row.ipHash, row.ipDailyCap)
+      .run();
+    if ((inserted.meta.changes ?? 0) > 0) return "created";
+    const existing = await this.db
+      .prepare(`SELECT 1 AS ok FROM waitlist WHERE email = ?`)
+      .bind(row.email)
+      .first<{ ok: number }>();
+    return existing ? "duplicate" : "rate_limited";
+  }
+
+  async countWaitlist(): Promise<number> {
+    const row = await this.db.prepare(`SELECT COUNT(*) AS n FROM waitlist`).first<{ n: number }>();
+    return row?.n ?? 0;
   }
 }
