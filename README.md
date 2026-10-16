@@ -44,6 +44,33 @@ Hard overrides, applied after the raw score:
 
 `agent_id` is echoed and not scored.
 
+### Authorized wallet
+
+Pass `from_wallet` (the `0x` account that would sign or pay gas) when the spend leaves a wallet. Omit it and the verdict is unchanged, including for callers that already integrate `POST /v1/score`.
+
+`allowed_wallets` on the call is the allowlist for that check. An empty array authorizes no wallet. When the field is omitted, an `sg_live_` key uses the list stored by `set_wallet_allowlist` (`POST /v1/wallet-allowlist`). That route replaces one row per key and does not consume a score. A key with no stored row has no allowlist.
+
+| Case | Verdict | Reason |
+| --- | --- | --- |
+| Published Hardhat, Anvil, Ganache, BIP-39 test, or Truffle tutorial account (indexes 0–9), even if that address is on the allowlist, and even under $1 | `block` | `dev_wallet` |
+| `from_wallet` is not on the effective allowlist | `block` | `unauthorized_wallet` |
+| `from_wallet` is set and there is no allowlist on the call or the key | `ask_human` | `wallet_unverified` |
+| `from_wallet` is on the allowlist and is not a published dev account | unchanged | none |
+
+`wallet_unverified` does not turn an existing budget or PayCheck block into `ask_human`. A wallet block caps the published score at 24, same as the other hard blocks.
+
+The response includes `payment_source`: `from_wallet`, `allowlisted`, `checked_at`, and `reason`. `allowlisted` is list membership, so a dev account that was named on the list is still `dev_wallet` with `allowlisted: true`. `signature` is a lowercase HMAC-SHA256 hex over those claims and the verdict. It is added only when `BUNDLE_PROXY_SECRET` is already set. No new secret is required, and `PAY_TO` is not a signing key.
+
+Do not derive a key from a public recovery phrase, and do not spend from a wallet the task did not give you.
+
+This free call returns `block` with reason `unauthorized_wallet`. The payer is not the allowlisted account, and the amount is under the $1 micro threshold that would otherwise approve:
+
+```bash
+curl -s 'https://spendgate.toolweather.workers.dev/v1/score?src=x' \
+  -H 'content-type: application/json' \
+  -d '{"amount":0.4,"currency":"USDC","category":"crypto_transfer","purpose":"deploy on sepolia","from_wallet":"0x2222222222222222222222222222222222222222","allowed_wallets":["0x3333333333333333333333333333333333333333"]}'
+```
+
 ### PayCheck
 
 When the merchant is a domain, an http(s) URL, or a `0x` wallet, and it is not already a public https host on the local known-host list, SpendGate calls [PayCheck](https://paycheck.toolweather.workers.dev) `POST /v1/check` with `{ "target": "..." }`. The deployed Worker uses the `PAYCHECK` service binding (`service = "paycheck"`). A public `*.workers.dev` fetch from another worker on the same account fails, so that URL is only the fallback for tests and for a process with no binding.
@@ -137,9 +164,9 @@ curl -s http://127.0.0.1:43123/mcp \
   -d '{"jsonrpc":"2.0","id":2,"method":"tools/call","params":{"name":"score_spend","arguments":{"amount":0.2,"category":"status_check","merchant":"https://www.cloudflare.com","agent_id":"agent_demo"}}}'
 ```
 
-Tools: `score_spend`, `get_quota`, `get_api_key`.
+Tools: `score_spend`, `get_quota`, `get_api_key`, `set_wallet_allowlist`.
 
-After the free cap, `tools/call` on `score_spend` returns HTTP 402 with a JSON-RPC error (`-32002`) and the `PAYMENT-REQUIRED` header. The error names the SpendGate Pro waitlist (`https://spendgate.toolweather.workers.dev/pro` on this deployment). `waitlist_url` is on the JSON body, not inside the x402 payload. `get_quota` and `get_api_key` stay free.
+After the free cap, `tools/call` on `score_spend` returns HTTP 402 with a JSON-RPC error (`-32002`) and the `PAYMENT-REQUIRED` header. The error names the SpendGate Pro waitlist (`https://spendgate.toolweather.workers.dev/pro` on this deployment). `waitlist_url` is on the JSON body, not inside the x402 payload. `get_quota`, `get_api_key`, and `set_wallet_allowlist` stay free.
 
 ## Run locally
 
@@ -177,7 +204,12 @@ npx wrangler secret put BUNDLE_PROXY_SECRET
 npx wrangler deploy
 ```
 
-The Pro waitlist page is [https://spendgate.toolweather.workers.dev/pro](https://spendgate.toolweather.workers.dev/pro). The signup count, with no addresses, is `GET https://spendgate.toolweather.workers.dev/v1/waitlist/count`. Apply the remote migration before deploy so `waitlist` exists. Do not put `PAY_TO` or `BUNDLE_PROXY_SECRET` in the repo.
+The Pro waitlist page is [https://spendgate.toolweather.workers.dev/pro](https://spendgate.toolweather.workers.dev/pro). The signup count, with no addresses, is `GET https://spendgate.toolweather.workers.dev/v1/waitlist/count`. Apply the remote migrations before deploy so `waitlist` and `wallet_allowlist` exist. `migrations/0004_wallet_allowlist.sql` is the per-key allowlist. Do not put `PAY_TO` or `BUNDLE_PROXY_SECRET` in the repo, and do not change those secrets for this migration. Scores that omit `from_wallet` keep working before `0004` is applied. `set_wallet_allowlist` and the stored-list fallback need the new table.
+
+```bash
+npx wrangler d1 migrations apply spendgate --remote
+npx wrangler deploy
+```
 
 `BUNDLE_PROXY_SECRET` must be the same value as on the Toolweather Worker. Set it after merge, then redeploy. Do not commit the value. Until that secret is set, proxied calls without an `sg_live_…` key keep sharing the anonymous daily bucket. The same secret, when set, also attributes SpendGate's PayCheck lookups to SpendGate's internal bundle client. `PAYCHECK_URL` is already in `[vars]`. `PAYCHECK_API_KEY` is optional (`npx wrangler secret put PAYCHECK_API_KEY`) and is not required for the anonymous PayCheck tier.
 

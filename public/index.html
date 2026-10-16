@@ -127,6 +127,10 @@
           <h3>Two hard rules</h3>
           <p>Over a budget you pass in, the verdict is block. A PayCheck block is also do not pay. Strictly under $<span data-policy="micro_threshold_usd">1</span>, it is approve, unless one of those block rules fires first.</p>
         </div>
+        <div class="rule">
+          <h3>Authorized wallet</h3>
+          <p>Pass <span class="mono">from_wallet</span>. A published Hardhat, Anvil, or other public dev account is block (<span class="mono">dev_wallet</span>). A wallet that is not allowlisted is block (<span class="mono">unauthorized_wallet</span>). A wallet with no allowlist is ask_human (<span class="mono">wallet_unverified</span>). Leave the wallet off and the score is unchanged.</p>
+        </div>
       </div>
     </section>
 
@@ -138,10 +142,18 @@
 
     <section>
       <h2>Call it from an agent</h2>
-      <pre><code>curl -s $ORIGIN/v1/score \
+      <pre><code data-origin>curl -s $ORIGIN/v1/score \
   -H 'content-type: application/json' \
   -d '{"amount":12,"currency":"USDC","category":"api_call","merchant":"https://api.openai.com","agent_id":"planner"}'</code></pre>
-      <p class="muted">MCP tools <span class="mono">score_spend</span>, <span class="mono">get_quota</span>, and <span class="mono">get_api_key</span> live at <a href="/.well-known/mcp">/.well-known/mcp</a>. Agent notes are in <a href="/llms.txt">llms.txt</a>.</p>
+      <p class="muted">MCP tools <span class="mono">score_spend</span>, <span class="mono">get_quota</span>, <span class="mono">get_api_key</span>, and <span class="mono">set_wallet_allowlist</span> live at <a href="/.well-known/mcp">/.well-known/mcp</a>. Agent notes are in <a href="/llms.txt">llms.txt</a>.</p>
+    </section>
+
+    <section>
+      <h2>Block a wallet the agent does not own</h2>
+      <p>This free call returns <span class="mono">block</span> with reason <span class="mono">unauthorized_wallet</span>. The payer is not the allowlisted account, and $0.40 would otherwise approve under the micro threshold.</p>
+      <pre><code>curl -s 'https://spendgate.toolweather.workers.dev/v1/score?src=x' \
+  -H 'content-type: application/json' \
+  -d '{"amount":0.4,"currency":"USDC","category":"crypto_transfer","purpose":"deploy on sepolia","from_wallet":"0x2222222222222222222222222222222222222222","allowed_wallets":["0x3333333333333333333333333333333333333333"]}'</code></pre>
     </section>
 
     <footer>
@@ -151,8 +163,8 @@
   </div>
   <script src="/site.js"></script>
   <script>
-    document.querySelector("pre code").textContent =
-      document.querySelector("pre code").textContent.replace("$ORIGIN", location.origin);
+    const originSnippet = document.querySelector("pre code[data-origin]");
+    if (originSnippet) originSnippet.textContent = originSnippet.textContent.replace("$ORIGIN", location.origin);
   </script>
 </body>
 </html>

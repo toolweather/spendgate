@@ -100,6 +100,36 @@ export function openApiDocument(origin: string, config: Config) {
           },
         },
       },
+      "/v1/wallet-allowlist": {
+        post: {
+          operationId: "setWalletAllowlist",
+          summary: "Store the wallets an API key may spend from",
+          description:
+            "Replaces the allowlist for one sg_live_ key in a single write. Does not consume a score. Public developer test accounts are rejected. An empty array authorizes no wallet.",
+          parameters: [
+            {
+              name: "Authorization",
+              in: "header",
+              required: false,
+              schema: { type: "string" },
+              description: "Bearer sg_live_… key. Required unless api_key is in the body.",
+            },
+          ],
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: { $ref: "#/components/schemas/WalletAllowlistRequest" },
+              },
+            },
+          },
+          responses: {
+            "200": { description: "Allowlist replaced." },
+            "400": { description: "allowed_wallets was missing, not addresses, or contained a public dev account." },
+            "401": { description: "API key missing or not recognized." },
+          },
+        },
+      },
       "/v1/waitlist": {
         post: {
           operationId: "joinWaitlist",
@@ -183,17 +213,52 @@ export function openApiDocument(origin: string, config: Config) {
             daily_budget_remaining: { type: "number", minimum: 0 },
             monthly_budget_remaining: { type: "number", minimum: 0 },
             risk_hints: { type: "array", items: { type: "string" } },
+            from_wallet: {
+              type: "string",
+              description: "0x account that would sign or pay gas. Omit to leave the verdict unchanged.",
+            },
+            allowed_wallets: {
+              type: "array",
+              items: { type: "string" },
+              description: "Allowlist for this call. Omit to use the stored per-key list.",
+            },
+          },
+        },
+        WalletAllowlistRequest: {
+          type: "object",
+          required: ["allowed_wallets"],
+          properties: {
+            allowed_wallets: { type: "array", items: { type: "string" } },
+            api_key: { type: "string", description: "sg_live_ key. Optional when Authorization is set." },
           },
         },
         ScoreResponse: {
           type: "object",
-          required: ["score", "verdict", "reasons", "recommended_action", "checked_at"],
+          required: ["score", "verdict", "reasons", "recommended_action", "checked_at", "payment_source"],
           properties: {
             score: { type: "integer", minimum: 0, maximum: 100 },
             verdict: { type: "string", enum: ["approve", "ask_human", "block"] },
             reasons: { type: "array", items: { type: "string" } },
             recommended_action: { type: "string" },
             checked_at: { type: "string", format: "date-time" },
+            payment_source: { $ref: "#/components/schemas/PaymentSource" },
+          },
+        },
+        PaymentSource: {
+          type: "object",
+          required: ["from_wallet", "allowlisted", "checked_at", "reason"],
+          properties: {
+            from_wallet: { type: ["string", "null"] },
+            allowlisted: { type: ["boolean", "null"] },
+            checked_at: { type: "string", format: "date-time" },
+            reason: {
+              type: ["string", "null"],
+              enum: ["dev_wallet", "unauthorized_wallet", "wallet_unverified", null],
+            },
+            signature: {
+              type: "string",
+              description: "HMAC-SHA256 hex. Present only when BUNDLE_PROXY_SECRET is set.",
+            },
           },
         },
       },

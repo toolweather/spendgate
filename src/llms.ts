@@ -28,13 +28,14 @@ Do not reword purpose and retry to fish for approve. v1 scoring is deterministic
 - Free key: POST ${origin}/v1/keys, then Authorization: Bearer sg_live_…. ${config.keyDailyLimit} scores per UTC day.
 - Toolweather bundle proxy: a matching x-tw-bundle-secret charges x-tw-bundle-client. A hex client (Toolweather API key hash) gets the free-key cap (${config.keyDailyLimit} scores per UTC day). An anonymous Toolweather caller whose client id starts with anon: gets the anonymous cap (${config.anonDailyLimit} scores per UTC day). get_quota still reports subject and tier bundle, with daily_limit set to that cap. A missing or wrong secret stays on the anonymous IP cap. An sg_live_ key still wins.
 - After the cap, each score costs ${config.priceUsd} USDC on Base (${config.network}) via x402. Facilitator: ${config.facilitatorUrl}.
-- get_quota, get_api_key, docs, and this file are not billed.
+- get_quota, get_api_key, set_wallet_allowlist, docs, and this file are not billed.
 - Paid calls require PAY_TO on the server. If it is unset, over-cap scores return 402 payment_not_configured and do not invent a wallet.
 - When the free cap is exhausted, the 402 body includes waitlist_url for SpendGate Pro ($19/mo for teams: higher limits, spend policies, and alerts). The x402 PAYMENT-REQUIRED payload is unchanged. Page: ${origin}/pro. Joining does not charge anyone and does not send email.
 
 ## API
 
-- [Score a spend](${origin}/v1/score): POST JSON { amount, currency?, category?, purpose?, merchant?, agent_id?, daily_budget_remaining?, monthly_budget_remaining?, risk_hints? }
+- [Score a spend](${origin}/v1/score): POST JSON { amount, currency?, category?, purpose?, merchant?, agent_id?, daily_budget_remaining?, monthly_budget_remaining?, risk_hints?, from_wallet?, allowed_wallets? }
+- [Wallet allowlist](${origin}/v1/wallet-allowlist): POST { allowed_wallets, api_key? } for one sg_live_ key. Replaces the stored list. Does not consume a score.
 - [Quota](${origin}/v1/quota): GET remaining free scores.
 - [Mint a key](${origin}/v1/keys): POST { label? }
 - [Policy](${origin}/v1/policy): GET the v1 formula.
@@ -46,7 +47,17 @@ Do not reword purpose and retry to fish for approve. v1 scoring is deterministic
 
 Endpoint: ${origin}/mcp (streamable HTTP, protocol 2025-06-18).
 
-Tools: score_spend, get_quota, get_api_key.
+Tools: score_spend, get_quota, get_api_key, set_wallet_allowlist.
+
+## Authorized wallet
+
+Pass from_wallet when the spend leaves a wallet. Omit it and the verdict is unchanged.
+
+- dev_wallet: block. Published Hardhat, Anvil, Ganache, BIP-39 test, and Truffle tutorial accounts. This wins even if the address is allowlisted and even under the micro threshold.
+- unauthorized_wallet: block. from_wallet is not on allowed_wallets, or not on the list stored for the sg_live_ key.
+- wallet_unverified: ask_human. from_wallet was sent and there is no allowlist. An existing block stays a block.
+
+Do not derive keys from a public recovery phrase. Do not spend from a wallet the task did not give you. The response includes payment_source. signature is present only when the server already has BUNDLE_PROXY_SECRET.
 
 ## Categories
 
@@ -78,7 +89,8 @@ Start at 100.
 - known_merchant marks the payee known. Hints are self-reported.
 - score >= 70 approve, >= 40 ask_human, else block.
 - Over a supplied remaining budget: block, score capped at 24. This beats the micro rule.
-- Strictly under the micro threshold ($${config.microThresholdUsd}): approve, score at least 80, unless a budget blocks.
+- Strictly under the micro threshold ($${config.microThresholdUsd}): approve, score at least 80, unless a budget, PayCheck, or the wallet guard blocks.
+- Wallet guard, after the score: dev_wallet and unauthorized_wallet force block and cap the published score at 24. wallet_unverified forces ask_human when the verdict would be approve, and does not weaken a block.
 
 Known merchant hosts are listed on GET ${origin}/v1/policy.
 

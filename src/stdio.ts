@@ -1,6 +1,6 @@
 import { readConfig, type Config } from "./env.js";
 import { handleMcpMessage } from "./mcp.js";
-import { mintKey, readQuota, scoreRequest } from "./service.js";
+import { mintKey, readQuota, scoreRequest, setWalletAllowlist } from "./service.js";
 import { MemoryUsageStore } from "./store.js";
 
 const MAX_BUFFER = 1_048_576;
@@ -69,6 +69,16 @@ export function createStdioSession(): StdioSession {
             typeof args.label === "string" ? args.label.replace(/[\u0000-\u001f]/g, "").trim().slice(0, 80) || null : null;
           return mintKey({ store, config, ip: "glama", now, label });
         },
+        allowlist: (args) =>
+          setWalletAllowlist({
+            store,
+            config,
+            authorization: null,
+            apiKeyArgument: typeof args.api_key === "string" ? args.api_key : null,
+            ip: "glama",
+            now,
+            body: args,
+          }),
       });
       return result.body;
     },

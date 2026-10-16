@@ -253,7 +253,7 @@ describe("HTTP API", () => {
     const card = await built.app.request("/.well-known/mcp", {}, built.env);
     const cardBody = (await card.json()) as { transport: { endpoint: string }; tools: Array<{ name: string }> };
     expect(cardBody.transport.endpoint).toBe("/mcp");
-    expect(cardBody.tools.map((tool) => tool.name)).toEqual(["score_spend", "get_quota", "get_api_key"]);
+    expect(cardBody.tools.map((tool) => tool.name)).toEqual(["score_spend", "get_quota", "get_api_key", "set_wallet_allowlist"]);
 
     const x402 = await built.app.request("/.well-known/x402", {}, built.env);
     const x402Body = (await x402.json()) as { configured: boolean; facilitator: string; resources: unknown[] };
@@ -453,7 +453,12 @@ describe("MCP", () => {
 
     const list = await post(built, "/mcp", { jsonrpc: "2.0", id: 2, method: "tools/list" });
     const listBody = (await list.json()) as { result: { tools: Array<{ name: string }> } };
-    expect(listBody.result.tools.map((tool) => tool.name)).toEqual(["score_spend", "get_quota", "get_api_key"]);
+    expect(listBody.result.tools.map((tool) => tool.name)).toEqual([
+      "score_spend",
+      "get_quota",
+      "get_api_key",
+      "set_wallet_allowlist",
+    ]);
 
     const minted = await post(built, "/mcp", {
       jsonrpc: "2.0",

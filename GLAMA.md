@@ -2,7 +2,7 @@
 
 SpendGate's production server is the Cloudflare Worker at `https://spendgate.toolweather.workers.dev/mcp`. Glama's open-source registry ([toolweather/spendgate](https://glama.ai/mcp/servers/toolweather/spendgate)) builds a local process and introspects it over stdio. The root `Dockerfile` is that process.
 
-The container exposes `score_spend`, `get_quota`, and `get_api_key` with the same schemas and descriptions as the Worker. Quota and keys live in memory for the process lifetime. It does not read `PAY_TO` and does not call the x402 facilitator. Worker pricing is unchanged. The stdio fetch stub throws, so a PayCheck merchant lookup fails open to the local known-host list and `score_spend` still returns.
+The container exposes `score_spend`, `get_quota`, `get_api_key`, and `set_wallet_allowlist` with the same schemas and descriptions as the Worker. Quota, keys, and wallet allowlists live in memory for the process lifetime. It does not read `PAY_TO` and does not call the x402 facilitator. Worker pricing is unchanged. The stdio fetch stub throws, so a PayCheck merchant lookup fails open to the local known-host list and `score_spend` still returns.
 
 `glama.json` claims the listing for the `toolweather` maintainer and carries the short description Glama should show: score a planned spend to `approve`, `ask_human`, or `block`; free tier, then x402 USDC on Base. After this file is on the default branch, open the server page, choose **Claim ownership**, then **Sync Server**.
 
@@ -35,4 +35,4 @@ printf '%s\n' \
   | docker run -i --rm spendgate-stdio
 ```
 
-The tools list should be `score_spend`, `get_quota`, and `get_api_key`.
+The tools list should be `score_spend`, `get_quota`, `get_api_key`, and `set_wallet_allowlist`.

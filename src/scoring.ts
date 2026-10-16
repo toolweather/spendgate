@@ -1,4 +1,5 @@
 import { DEFAULT_PAYCHECK_URL, PAYCHECK_TIMEOUT_MS, SPENDGATE_PAYCHECK_CLIENT } from "./env.js";
+import { DEV_WALLET_GROUPS, MAX_ALLOWLIST } from "./wallets.js";
 
 /**
  * SpendGate scoring policy v1.
@@ -617,6 +618,21 @@ export function policyDocument(microThresholdUsd: number, paycheckUrl = DEFAULT_
       micro:
         "If amount is strictly under the micro threshold and no supplied budget is exceeded and PayCheck did not block, verdict is approve and score is at least 80.",
       agent_id: "Echoed and not scored in v1.",
+    },
+    wallet_guard: {
+      from_wallet:
+        "Optional 0x account that would sign or pay gas. Omit it and the verdict is unchanged. Callers that do not pass a wallet are not checked.",
+      allowed_wallets:
+        "Optional array on this call. When set, including an empty array, it is the allowlist. When omitted, an sg_live_ key uses the list stored by set_wallet_allowlist. No list at all with a from_wallet is ask_human, reason wallet_unverified.",
+      max_allowlist: MAX_ALLOWLIST,
+      dev_wallet:
+        "block. Published Hardhat/Anvil, Ganache, BIP-39 test, and Truffle tutorial accounts 0-9. This wins even if the address is allowlisted and even under the micro threshold.",
+      unauthorized_wallet: "block. from_wallet is not on the effective allowlist, including under the micro threshold.",
+      wallet_unverified:
+        "ask_human when the spend would otherwise be approve or ask_human. An existing block is not weakened.",
+      payment_source:
+        "from_wallet, allowlisted, checked_at, reason. signature is lowercase HMAC-SHA256 hex over paymentSourceMacMessage only when BUNDLE_PROXY_SECRET is already set. No new secret is required. PAY_TO is not a signing key.",
+      dev_accounts: DEV_WALLET_GROUPS,
     },
   };
 }

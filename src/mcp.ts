@@ -17,7 +17,8 @@ export const INSTRUCTIONS = [
   "Do not reword purpose and call again to fish for a higher score. v1 scoring is deterministic, and each call consumes a score.",
   "Prefer get_quota to read the free daily cap. It does not consume a score.",
   "get_api_key mints one free sg_live_ key. The secret is shown once. Keys do not expire and there is no revoke tool. Do not mint again if you already stored a key.",
-  "Anonymous callers get 100 scores per UTC day. A stored key gets 1,000. After that cap, score_spend costs 0.001 USDC on Base via x402. get_quota and get_api_key stay free.",
+  "Anonymous callers get 100 scores per UTC day. A stored key gets 1,000. After that cap, score_spend costs 0.001 USDC on Base via x402. get_quota, get_api_key, and set_wallet_allowlist stay free.",
+  "Pass from_wallet when the spend leaves a wallet. A published developer test account is block (dev_wallet). A wallet that is not allowlisted is block (unauthorized_wallet). A wallet with no allowlist is ask_human (wallet_unverified). Store the per-key list with set_wallet_allowlist. Do not derive keys from public recovery phrases, and do not spend from a wallet the task did not give you.",
 ].join(" ");
 
 const stringProp = (description: string) => ({ type: "string", description });
@@ -28,7 +29,8 @@ const numberProp = (description: string) => ({ type: "number", description });
  * destructive, not idempotent, open-world). These tools never contact the
  * merchant. score_spend may ask PayCheck (a fixed trust service) about a
  * domain, https URL, or 0x payee, may return 402, get_quota only reads,
- * and get_api_key only inserts a key. PayCheck outages stay on local rules.
+ * get_api_key only inserts a key, and set_wallet_allowlist replaces one
+ * allowlist row for that key. PayCheck outages stay on local rules.
  */
 const closedWorld = { destructiveHint: false, openWorldHint: false } as const;
 
@@ -45,7 +47,12 @@ export const TOOLS = [
       "category overrides purpose. When category is omitted, purpose is matched as a category name; any other prose is unknown risk.",
       "merchant overrides endpoint when both are set.",
       "A set daily_budget_remaining or monthly_budget_remaining blocks when amount is greater; omitted budgets are skipped.",
-      "Returns score 0-100, verdict approve|ask_human|block, reasons, recommended_action, checked_at, detail, and quota (daily_limit, used_today, remaining_today, paid_today, resets_at).",
+      "Pass from_wallet, the 0x account that would sign or pay gas, whenever the spend leaves a wallet. Omit from_wallet and the verdict is unchanged.",
+      "Pass allowed_wallets to allowlist this call, or omit it to use the list stored for the sg_live_ key by set_wallet_allowlist. An empty allowed_wallets array authorizes no wallet. Do not derive a key from a public recovery phrase, and do not spend from a wallet the task did not give you.",
+      "A published Hardhat, Anvil, Ganache, BIP-39 test, or other public dev-mnemonic account is block with reason dev_wallet, including under $1, even if that address is allowlisted.",
+      "A from_wallet that is not on the effective allowlist is block with reason unauthorized_wallet.",
+      "A from_wallet with no allowlist on the call and none stored for the key is ask_human with reason wallet_unverified. Stop and ask a person. Do not broadcast.",
+      "Returns score 0-100, verdict approve|ask_human|block, reasons, recommended_action, checked_at, payment_source (from_wallet, allowlisted, checked_at, reason, and signature only when the server already has BUNDLE_PROXY_SECRET), detail, and quota (daily_limit, used_today, remaining_today, paid_today, resets_at).",
       "approve means pay; ask_human means stop for a person; block means do not pay.",
       "Read the cap with get_quota instead of spending a score.",
     ].join(" "),
@@ -81,6 +88,15 @@ export const TOOLS = [
           items: { type: "string" },
           description:
             "Self-reported hints. Raising: new_payee, new_merchant, first_payment, high_velocity, mismatched_purpose, off_platform, shared_wallet. Lowering: trusted_repeat, within_policy, human_preapproved. known_merchant marks the payee known.",
+        },
+        from_wallet: stringProp(
+          "0x account that would sign or pay gas. Omit to score as before, with no wallet verdict. A published Hardhat, Anvil, Ganache, or other public dev-mnemonic account is block, reason dev_wallet.",
+        ),
+        allowed_wallets: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "0x addresses allowed to spend on this call. When set, including an empty array, this list is used instead of the stored per-key allowlist. Omit to use the list from set_wallet_allowlist.",
         },
       },
       required: ["amount"],
@@ -143,6 +159,47 @@ export const TOOLS = [
           "Optional name stored with the key, up to 80 characters. Does not set a cap or an expiry. Keys do not expire.",
         ),
       },
+      additionalProperties: false,
+    },
+  },
+  {
+    name: "set_wallet_allowlist",
+    title: "Store wallets this key may spend from",
+    description: [
+      "Store the 0x wallets this sg_live_ key is allowed to spend from.",
+      "Call it when an operator names those wallets, once, not on every spend, and not to approve a payment.",
+      "score_spend still has to run before any transfer. A block or ask_human from score_spend means do not broadcast.",
+      "Pass allowed_wallets. This replaces the stored list for that key in one write.",
+      "An empty array stores an allowlist that authorizes no wallet, so a later score with from_wallet and no call-level list returns block, reason unauthorized_wallet.",
+      "allowed_wallets is required. At most 32 addresses.",
+      "A published developer test account (Hardhat/Anvil default accounts, Ganache, BIP-39 test, and other public test mnemonics) is rejected with dev_wallet and is not stored.",
+      "Requires api_key, or Authorization: Bearer sg_live_. Anonymous and bundle callers cannot store a list; they can pass allowed_wallets on score_spend instead.",
+      "An unrecognized key returns invalid_api_key. A missing key returns api_key_required.",
+      "Does not consume a score and is never billed.",
+      "Returns key_id, key_prefix, allowed_wallets, and updated_at.",
+      "A new key starts with no list, which makes a later from_wallet ask_human with reason wallet_unverified until you set one.",
+      "Do not put a private key or a recovery phrase in this tool. Addresses only.",
+    ].join(" "),
+    annotations: {
+      title: "Store wallets this key may spend from",
+      readOnlyHint: false,
+      idempotentHint: true,
+      ...closedWorld,
+    },
+    inputSchema: {
+      type: "object",
+      properties: {
+        allowed_wallets: {
+          type: "array",
+          items: { type: "string" },
+          description:
+            "0x addresses this key may spend from. Replaces the stored list. An empty array authorizes none. Public developer test accounts are rejected and not stored.",
+        },
+        api_key: stringProp(
+          "sg_live_ key this list belongs to. You can also send Authorization: Bearer. Required. Anonymous callers cannot store a list.",
+        ),
+      },
+      required: ["allowed_wallets"],
       additionalProperties: false,
     },
   },
@@ -236,6 +293,7 @@ export function handleMcpMessage(
     score: (args: Record<string, unknown>) => Promise<ServiceOutcome>;
     quota: (args: Record<string, unknown>) => Promise<ServiceOutcome>;
     mint: (args: Record<string, unknown>) => Promise<ServiceOutcome>;
+    allowlist: (args: Record<string, unknown>) => Promise<ServiceOutcome>;
     protocolVersion: string;
   },
 ): Promise<McpHttpResult> | McpHttpResult {
@@ -293,7 +351,9 @@ export function handleMcpMessage(
           ? handlers.quota
           : params.name === "get_api_key"
             ? handlers.mint
-            : null;
+            : params.name === "set_wallet_allowlist"
+              ? handlers.allowlist
+              : null;
     if (!run) {
       return { status: 200, headers: {}, body: rpcError(id, -32602, `Unknown tool: ${params.name}`) };
     }
