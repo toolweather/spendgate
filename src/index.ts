@@ -1,3 +1,4 @@
+import { withSources } from "./sources.js";
 import { Hono } from "hono";
 import { cors } from "hono/cors";
 import type { Env } from "./env.js";
@@ -390,4 +391,11 @@ export function createApp(options: AppOptions = {}) {
   return app;
 }
 
-export default createApp();
+const SG_REST: [RegExp, string][] = [
+  [/^POST \/v1\/score$/, "score_spend"],
+  [/^GET \/v1\/quota$/, "get_quota"],
+];
+const defaultApp = createApp();
+export default {
+  fetch: withSources((req: Request, env: unknown, ctx: ExecutionContext) => defaultApp.fetch(req, env as never, ctx), SG_REST),
+};
