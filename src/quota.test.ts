@@ -35,6 +35,7 @@ function sqliteDb() {
     "migrations/0002_waitlist.sql",
     "migrations/0003_source_daily.sql",
     "migrations/0004_wallet_allowlist.sql",
+    "migrations/0005_source_callers.sql",
   ]) {
     sqlite.exec(readFileSync(file, "utf8"));
   }
@@ -242,6 +243,13 @@ describe("daily quota counter", () => {
       { tool: "score_spend", outcome: "limit", n: 2 },
       { tool: "score_spend", outcome: "ok", n: 5 },
     ]);
+    const callerRows = (
+      sqlite.prepare("SELECT caller_hash, n FROM source_callers") as unknown as {
+        all(): Array<{ caller_hash: string; n: number }>;
+      }
+    ).all();
+    expect(callerRows.reduce((sum, row) => sum + row.n, 0)).toBe(10);
+    expect(callerRows.every((row) => row.caller_hash.length === 16 && !row.caller_hash.includes("203.0.113"))).toBe(true);
   });
 
   it("reports the write's count when a later read is stuck at 1", async () => {

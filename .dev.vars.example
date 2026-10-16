@@ -11,3 +11,9 @@ BUNDLE_PROXY_SECRET=
 # PAYCHECK_URL=
 # Optional pc_live_ key. Unset uses BUNDLE_PROXY_SECRET, then anonymous PayCheck.
 # PAYCHECK_API_KEY=
+
+# Optional comma-separated SHA-256 prefixes left out of GET /v1/sources.
+# Hash the IP alone: printf '%s' "$IP" | sha256sum
+# Do not put the raw IP or a raw API key here.
+# SOURCES_EXCLUDE_KEY_HASHES=
+# SOURCES_EXCLUDE_IP_HASHES=

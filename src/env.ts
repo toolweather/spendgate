@@ -32,6 +32,16 @@ export interface Env {
    * `*.workers.dev` fetch, which fails between workers on the same account.
    */
   PAYCHECK?: Fetcher;
+  /**
+   * Comma-separated SHA-256 prefixes of API keys to omit from source counters.
+   * The raw key is not stored. Optional.
+   */
+  SOURCES_EXCLUDE_KEY_HASHES?: string;
+  /**
+   * Comma-separated SHA-256 prefixes of CF-Connecting-IP values to omit from
+   * source counters. Hash the IP alone, not the UTC day. The raw IP is not stored.
+   */
+  SOURCES_EXCLUDE_IP_HASHES?: string;
 }
 
 /** Public PayCheck worker. Anonymous checks work at low volume. */
