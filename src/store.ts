@@ -51,6 +51,10 @@ export interface UsageStore {
   joinWaitlist(row: WaitlistSignup): Promise<WaitlistJoinResult>;
   /** Number of stored addresses. Never returns the addresses. */
   countWaitlist(): Promise<number>;
+  /** Null when this key has never stored a list. An empty array is a stored list that authorizes nothing. */
+  getWalletAllowlist(keyId: string): Promise<string[] | null>;
+  /** Replace the key's allowlist in one write. */
+  setWalletAllowlist(keyId: string, wallets: string[], updatedAt: string): Promise<void>;
 }
 
 function emptyUsage(): UsageSnapshot {
@@ -64,11 +68,17 @@ interface MemoryWaitlistRow {
   ipHash: string;
 }
 
+interface MemoryAllowlist {
+  wallets: string[];
+  updatedAt: string;
+}
+
 export class MemoryUsageStore implements UsageStore {
   private keys = new Map<string, StoredKey>();
   private usage = new Map<string, UsageSnapshot>();
   private payments = new Map<string, StoredPayment>();
   private waitlist = new Map<string, MemoryWaitlistRow>();
+  private allowlists = new Map<string, MemoryAllowlist>();
 
   async getKeyByHash(hash: string): Promise<StoredKey | null> {
     return this.keys.get(hash) ?? null;
@@ -131,6 +141,15 @@ export class MemoryUsageStore implements UsageStore {
 
   async countWaitlist(): Promise<number> {
     return this.waitlist.size;
+  }
+
+  async getWalletAllowlist(keyId: string): Promise<string[] | null> {
+    const row = this.allowlists.get(keyId);
+    return row ? [...row.wallets] : null;
+  }
+
+  async setWalletAllowlist(keyId: string, wallets: string[], updatedAt: string): Promise<void> {
+    this.allowlists.set(keyId, { wallets: [...wallets], updatedAt });
   }
 }
 
@@ -287,5 +306,33 @@ export class D1UsageStore implements UsageStore {
   async countWaitlist(): Promise<number> {
     const row = await this.db.prepare(`SELECT COUNT(*) AS n FROM waitlist`).first<{ n: number }>();
     return row?.n ?? 0;
+  }
+
+  async getWalletAllowlist(keyId: string): Promise<string[] | null> {
+    const row = await this.db
+      .prepare(`SELECT wallets_json FROM wallet_allowlist WHERE key_id = ?`)
+      .bind(keyId)
+      .first<{ wallets_json: string }>();
+    if (!row) return null;
+    try {
+      const parsed = JSON.parse(row.wallets_json) as unknown;
+      if (!Array.isArray(parsed)) return null;
+      return parsed.filter((item): item is string => typeof item === "string");
+    } catch {
+      return null;
+    }
+  }
+
+  async setWalletAllowlist(keyId: string, wallets: string[], updatedAt: string): Promise<void> {
+    await this.db
+      .prepare(
+        `INSERT INTO wallet_allowlist (key_id, wallets_json, updated_at)
+         VALUES (?, ?, ?)
+         ON CONFLICT(key_id) DO UPDATE SET
+           wallets_json = excluded.wallets_json,
+           updated_at = excluded.updated_at`,
+      )
+      .bind(keyId, JSON.stringify(wallets), updatedAt)
+      .run();
   }
 }

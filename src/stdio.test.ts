@@ -21,7 +21,7 @@ describe("stdio introspection", () => {
       result: { tools: unknown };
     };
     expect(listed.result.tools).toEqual(TOOLS);
-    expect(TOOLS.map((tool) => tool.name)).toEqual(["score_spend", "get_quota", "get_api_key"]);
+    expect(TOOLS.map((tool) => tool.name)).toEqual(["score_spend", "get_quota", "get_api_key", "set_wallet_allowlist"]);
   });
 
   it("publishes safety annotations and the routing cues Glama scores", () => {
@@ -33,7 +33,9 @@ describe("stdio introspection", () => {
         openWorldHint: false,
       });
       expect(tool.annotations.readOnlyHint).toEqual(tool.name === "get_quota");
-      expect(tool.annotations.idempotentHint).toEqual(tool.name === "get_quota");
+      expect(tool.annotations.idempotentHint).toEqual(
+        tool.name === "get_quota" || tool.name === "set_wallet_allowlist",
+      );
     }
 
     expect(byName.score_spend?.description).toMatch(/pure read/);
@@ -53,6 +55,18 @@ describe("stdio introspection", () => {
     expect(byName.get_api_key?.description).toMatch(/Do not call every turn/);
     expect(byName.get_api_key?.description).toMatch(/key_mint_limit/);
     expect(byName.get_api_key?.description).toMatch(/label is an optional stored name/);
+
+    expect(byName.score_spend?.description).toMatch(/from_wallet/);
+    expect(byName.score_spend?.description).toMatch(/dev_wallet/);
+    expect(byName.score_spend?.description).toMatch(/unauthorized_wallet/);
+    expect(byName.score_spend?.description).toMatch(/wallet_unverified/);
+    expect(byName.score_spend?.description).toMatch(/public recovery phrase/);
+
+    expect(byName.set_wallet_allowlist?.description).toMatch(/does not consume a score/i);
+    expect(byName.set_wallet_allowlist?.description).toMatch(/replaces the stored list/);
+    expect(byName.set_wallet_allowlist?.description).toMatch(/not to approve a payment/);
+    expect(byName.set_wallet_allowlist?.description).toMatch(/dev_wallet/);
+    expect(byName.set_wallet_allowlist?.description).toMatch(/private key/);
   });
 
   it("keeps the LobeHub catalog on the same descriptions and annotations", () => {

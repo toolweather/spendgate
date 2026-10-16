@@ -1,8 +1,17 @@
 import type { Config } from "./env.js";
-import { encodeBase64Json, randomHex, sha256Hex } from "./crypto.js";
+import { encodeBase64Json, hmacSha256Hex, randomHex, sha256Hex } from "./crypto.js";
 import { lookupPaycheck, paycheckTarget } from "./paycheck.js";
-import { parseSpendBody, scoreSpend, type ScoreResult } from "./scoring.js";
+import { APPROVE_MIN_SCORE, BUDGET_SCORE_CAP, parseSpendBody, scoreSpend, type ScoreResult } from "./scoring.js";
 import type { StoredKey, UsageStore } from "./store.js";
+import {
+  applyWalletGuard,
+  decideWallet,
+  parseAllowlistBody,
+  parseWalletFields,
+  paymentSourceMacMessage,
+  type PaymentSourceClaims,
+  type WalletDecision,
+} from "./wallets.js";
 import { waitlistPitch, waitlistUrl } from "./waitlist.js";
 import {
   payloadMismatch,
@@ -65,7 +74,13 @@ export interface ScoreResponseBody {
       replayed: boolean;
     };
   };
+  payment_source: PaymentSource;
   quota: Pick<QuotaView, "daily_limit" | "used_today" | "remaining_today" | "paid_today" | "resets_at">;
+}
+
+export interface PaymentSource extends PaymentSourceClaims {
+  /** Lowercase HMAC-SHA256 hex. Present only when BUNDLE_PROXY_SECRET is set. */
+  signature?: string;
 }
 
 export type ServiceOutcome =
@@ -133,13 +148,19 @@ function quotaSlice(quota: QuotaView): ScoreResponseBody["quota"] {
   };
 }
 
-export function toScoreBody(result: ScoreResult, quota: QuotaView, paycheckError: string | null = null): ScoreResponseBody {
+export function toScoreBody(
+  result: ScoreResult,
+  quota: QuotaView,
+  paycheckError: string | null = null,
+  paymentSource: PaymentSource,
+): ScoreResponseBody {
   return {
     score: result.score,
     verdict: result.verdict,
     reasons: result.reasons,
     recommended_action: result.recommended_action,
     checked_at: result.checked_at,
+    payment_source: paymentSource,
     detail: {
       check_id: result.check_id,
       policy_version: result.policy_version,
@@ -283,7 +304,16 @@ export async function resolveAuth(args: {
   };
 }
 
-function errorOutcome(status: 400 | 402 | 502 | 503, code: string, message: string, extra?: Record<string, unknown>, headers?: Record<string, string>): ServiceOutcome {
+async function signedPaymentSource(
+  secret: string | null,
+  source: PaymentSourceClaims,
+  verdict: string,
+): Promise<PaymentSource> {
+  if (!secret) return source;
+  return { ...source, signature: await hmacSha256Hex(secret, paymentSourceMacMessage(source, verdict)) };
+}
+
+function errorOutcome(status: 400 | 401 | 402 | 502 | 503, code: string, message: string, extra?: Record<string, unknown>, headers?: Record<string, string>): ServiceOutcome {
   return {
     status,
     headers: { "cache-control": "no-store", ...headers },
@@ -364,6 +394,44 @@ export async function mintKey(args: {
   };
 }
 
+export async function setWalletAllowlist(args: {
+  store: UsageStore;
+  config: Config;
+  authorization: string | null;
+  apiKeyArgument?: string | null;
+  ip: string | null;
+  now: Date;
+  body: unknown;
+  bundleSecret?: string | null;
+  bundleClient?: string | null;
+}): Promise<ServiceOutcome> {
+  const parsed = parseAllowlistBody(args.body);
+  if (!parsed.ok) return errorOutcome(400, parsed.code, parsed.message);
+
+  const auth = await resolveAuth(args);
+  if (!auth.ok) return auth.outcome;
+  if (!auth.auth.key) {
+    return errorOutcome(
+      401,
+      "api_key_required",
+      "An sg_live_ API key is required to store a wallet allowlist. Anonymous callers can pass allowed_wallets on a score instead.",
+    );
+  }
+
+  const updatedAt = args.now.toISOString();
+  await args.store.setWalletAllowlist(auth.auth.key.id, parsed.wallets, updatedAt);
+  return {
+    status: 200,
+    headers: { "cache-control": "no-store" },
+    body: {
+      key_id: auth.auth.key.id,
+      key_prefix: auth.auth.key.keyPrefix,
+      allowed_wallets: parsed.wallets,
+      updated_at: updatedAt,
+    },
+  };
+}
+
 export async function scoreRequest(args: {
   store: UsageStore;
   config: Config;
@@ -386,9 +454,23 @@ export async function scoreRequest(args: {
   if (!parsed.ok) {
     return errorOutcome(400, parsed.code, parsed.message);
   }
+  const walletFields = parseWalletFields(args.body);
+  if (!walletFields.ok) {
+    return errorOutcome(400, walletFields.code, walletFields.message);
+  }
 
   const auth = await resolveAuth(args);
   if (!auth.ok) return auth.outcome;
+
+  let storedAllowlist: string[] | null = null;
+  if (walletFields.fromWallet && walletFields.allowedWallets === null && auth.auth.key) {
+    storedAllowlist = await args.store.getWalletAllowlist(auth.auth.key.id);
+  }
+  const walletDecision: WalletDecision = decideWallet({
+    fromWallet: walletFields.fromWallet,
+    requestAllowlist: walletFields.allowedWallets,
+    storedAllowlist,
+  });
 
   const day = dayOf(args.now);
   const reserved = await args.store.tryConsumeFree(auth.auth.subject, day, auth.auth.limit);
@@ -491,7 +573,7 @@ export async function scoreRequest(args: {
   const paycheck = target
     ? await lookupPaycheck(args.fetchImpl, args.config, target, args.paycheck)
     : { verdict: null, error: null };
-  const result = scoreSpend(
+  const scored = scoreSpend(
     parsed.spend,
     {
       now: args.now,
@@ -500,6 +582,10 @@ export async function scoreRequest(args: {
     },
     paycheck.verdict,
   );
+  const result = applyWalletGuard(scored, walletDecision, {
+    block: BUDGET_SCORE_CAP,
+    ask: APPROVE_MIN_SCORE - 1,
+  });
 
   let settlement: SettleResponse | null = null;
   if (pending) {
@@ -530,7 +616,17 @@ export async function scoreRequest(args: {
   if (settlement && nonce) {
     quota.paid_today += 1;
   }
-  const body = toScoreBody(result, quota, paycheck.error);
+  const paymentSource = await signedPaymentSource(
+    args.config.bundleProxySecret,
+    {
+      from_wallet: walletDecision.fromWallet,
+      allowlisted: walletDecision.allowlisted,
+      checked_at: result.checked_at,
+      reason: walletDecision.reason,
+    },
+    result.verdict,
+  );
+  const body = toScoreBody(result, quota, paycheck.error, paymentSource);
   if (settlement) {
     body.detail.payment = {
       payer,

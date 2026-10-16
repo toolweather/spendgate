@@ -7,7 +7,7 @@ import { llmsFull, llmsTxt } from "./llms.js";
 import { handleMcpMessage, negotiateProtocol, serverCard } from "./mcp.js";
 import { openApiDocument } from "./openapi.js";
 import { policyDocument } from "./scoring.js";
-import { mintKey, readQuota, scoreRequest, type ServiceOutcome } from "./service.js";
+import { mintKey, readQuota, scoreRequest, setWalletAllowlist, type ServiceOutcome } from "./service.js";
 import { D1UsageStore, type UsageStore } from "./store.js";
 import { paymentRequirements } from "./x402.js";
 import { submitWaitlist, waitlistCount } from "./waitlist.js";
@@ -267,6 +267,27 @@ export function createApp(options: AppOptions = {}) {
     return send(c, await waitlistCount(store));
   });
 
+  app.post("/v1/wallet-allowlist", async (c) => {
+    const store = storeFor(c.env);
+    if (!store) return send(c, unavailable());
+    const body = await readBody(c.req.raw);
+    if (!body.ok) {
+      return c.json({ error: { code: "invalid_json", message: body.message } }, 400);
+    }
+    const record = body.value && typeof body.value === "object" ? (body.value as Record<string, unknown>) : {};
+    const outcome = await setWalletAllowlist({
+      store,
+      config: readConfig(c.env),
+      authorization: c.req.header("authorization") ?? null,
+      apiKeyArgument: typeof record.api_key === "string" ? record.api_key : null,
+      ip: clientIp(c.req.raw),
+      now: options.now?.() ?? new Date(),
+      body: body.value,
+      ...bundleFrom((name) => c.req.header(name)),
+    });
+    return send(c, outcome);
+  });
+
   app.post("/v1/score", async (c) => {
     const store = storeFor(c.env);
     if (!store) return send(c, unavailable());
@@ -372,6 +393,20 @@ export function createApp(options: AppOptions = {}) {
         const label = typeof args.label === "string" ? args.label.replace(/[\u0000-\u001f]/g, "").trim().slice(0, 80) || null : null;
         return mintKey({ store: ready, config, ip, now, label, ids: options.ids, ...bundle });
       },
+      allowlist: async (args) => {
+        const ready = requireStore();
+        if (!("getUsage" in ready)) return ready;
+        return setWalletAllowlist({
+          store: ready,
+          config,
+          authorization,
+          apiKeyArgument: typeof args.api_key === "string" ? args.api_key : null,
+          ip,
+          now,
+          body: args,
+          ...bundle,
+        });
+      },
     });
 
     const headers = new Headers(result.headers);
@@ -391,9 +426,10 @@ export function createApp(options: AppOptions = {}) {
   return app;
 }
 
-const SG_REST: [RegExp, string][] = [
+export const SG_REST: [RegExp, string][] = [
   [/^POST \/v1\/score$/, "score_spend"],
   [/^GET \/v1\/quota$/, "get_quota"],
+  [/^POST \/v1\/wallet-allowlist$/, "set_wallet_allowlist"],
 ];
 const defaultApp = createApp();
 export default {

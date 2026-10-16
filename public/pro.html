@@ -49,6 +49,14 @@
     </section>
 
     <section>
+      <h2>Block a wallet the agent does not own</h2>
+      <p>The free score endpoint refuses a <span class="mono">from_wallet</span> that is not on the allowlist. This call returns <span class="mono">block</span> with reason <span class="mono">unauthorized_wallet</span>, including under $1.</p>
+      <pre><code>curl -s 'https://spendgate.toolweather.workers.dev/v1/score?src=x' \
+  -H 'content-type: application/json' \
+  -d '{"amount":0.4,"currency":"USDC","category":"crypto_transfer","purpose":"deploy on sepolia","from_wallet":"0x2222222222222222222222222222222222222222","allowed_wallets":["0x3333333333333333333333333333333333333333"]}'</code></pre>
+    </section>
+
+    <section>
       <form id="waitlist" class="panel" action="/v1/waitlist" method="post">
         <h2>Join the waitlist</h2>
         <p class="muted">We store the address, lowercase it, and keep one row if you submit it again. No payment and no message during this test.</p>

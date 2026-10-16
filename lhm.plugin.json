@@ -8,7 +8,8 @@
   "tools": [
     {
       "name": "score_spend",
-      "description": "Score one planned payment before it is sent: a crypto transfer, gift card, subscription, or paid API or merchant. Do not use it for a pure read, or for a status_check under $1 you will not pay; that still burns a free score and approves unless a budget you pass is exceeded. Each call uses one free score (anonymous 100/UTC day, sg_live_ key 1,000 from get_api_key). Past that cap the call is HTTP 402 and costs 0.001 USDC on Base via x402. It does not pay the merchant. A domain, https URL, or 0x payee that is not on the local known-host list is checked with PayCheck. Trusted counts as a known merchant. Block means do not pay, including under the micro threshold. If PayCheck is unreachable, local merchant rules are used and the score still returns. While free quota remains, the same arguments consume another score. category overrides purpose. When category is omitted, purpose is matched as a category name; any other prose is unknown risk. merchant overrides endpoint when both are set. A set daily_budget_remaining or monthly_budget_remaining blocks when amount is greater; omitted budgets are skipped. Returns score 0-100, verdict approve|ask_human|block, reasons, recommended_action, checked_at, detail, and quota (daily_limit, used_today, remaining_today, paid_today, resets_at). approve means pay; ask_human means stop for a person; block means do not pay. Read the cap with get_quota instead of spending a score.",
+      "title": "Score a planned spend",
+      "description": "Score one planned payment before it is sent: a crypto transfer, gift card, subscription, or paid API or merchant. Do not use it for a pure read, or for a status_check under $1 you will not pay; that still burns a free score and approves unless a budget you pass is exceeded. Each call uses one free score (anonymous 100/UTC day, sg_live_ key 1,000 from get_api_key). Past that cap the call is HTTP 402 and costs 0.001 USDC on Base via x402. It does not pay the merchant. A domain, https URL, or 0x payee that is not on the local known-host list is checked with PayCheck. Trusted counts as a known merchant. Block means do not pay, including under the micro threshold. If PayCheck is unreachable, local merchant rules are used and the score still returns. While free quota remains, the same arguments consume another score. category overrides purpose. When category is omitted, purpose is matched as a category name; any other prose is unknown risk. merchant overrides endpoint when both are set. A set daily_budget_remaining or monthly_budget_remaining blocks when amount is greater; omitted budgets are skipped. Pass from_wallet, the 0x account that would sign or pay gas, whenever the spend leaves a wallet. Omit from_wallet and the verdict is unchanged. Pass allowed_wallets to allowlist this call, or omit it to use the list stored for the sg_live_ key by set_wallet_allowlist. An empty allowed_wallets array authorizes no wallet. Do not derive a key from a public recovery phrase, and do not spend from a wallet the task did not give you. A published Hardhat, Anvil, Ganache, BIP-39 test, or other public dev-mnemonic account is block with reason dev_wallet, including under $1, even if that address is allowlisted. A from_wallet that is not on the effective allowlist is block with reason unauthorized_wallet. A from_wallet with no allowlist on the call and none stored for the key is ask_human with reason wallet_unverified. Stop and ask a person. Do not broadcast. Returns score 0-100, verdict approve|ask_human|block, reasons, recommended_action, checked_at, payment_source (from_wallet, allowlisted, checked_at, reason, and signature only when the server already has BUNDLE_PROXY_SECRET), detail, and quota (daily_limit, used_today, remaining_today, paid_today, resets_at). approve means pay; ask_human means stop for a person; block means do not pay. Read the cap with get_quota instead of spending a score.",
       "annotations": {
         "title": "Score a planned spend",
         "readOnlyHint": false,
@@ -65,6 +66,17 @@
               "type": "string"
             },
             "description": "Self-reported hints. Raising: new_payee, new_merchant, first_payment, high_velocity, mismatched_purpose, off_platform, shared_wallet. Lowering: trusted_repeat, within_policy, human_preapproved. known_merchant marks the payee known."
+          },
+          "from_wallet": {
+            "type": "string",
+            "description": "0x account that would sign or pay gas. Omit to score as before, with no wallet verdict. A published Hardhat, Anvil, Ganache, or other public dev-mnemonic account is block, reason dev_wallet."
+          },
+          "allowed_wallets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "0x addresses allowed to spend on this call. When set, including an empty array, this list is used instead of the stored per-key allowlist. Omit to use the list from set_wallet_allowlist."
           }
         },
         "required": [
@@ -75,6 +87,7 @@
     },
     {
       "name": "get_quota",
+      "title": "Read today's free score quota",
       "description": "Read today's free-score balance. Prefer this over score_spend when you are not judging a specific payment, including before a batch or after a 402: it does not consume a score, returns no verdict, and is never billed. Do not use it to approve or block a spend. Pass api_key for that sg_live_ key (tier free, 1,000/UTC day); omit it for this client's anonymous bucket (tier anonymous, 100/UTC day). An unrecognized or non-sg_live_ key returns invalid_api_key and does not fall back. Returns subject (anonymous|api_key|bundle), key_id, key_prefix, tier (anonymous|free|bundle), daily_limit, used_today, remaining_today, paid_today, price_usd, price_atomic, asset (USDC), network, resets_at (next UTC midnight), and paid_configured. Mint a higher cap with get_api_key.",
       "annotations": {
         "title": "Read today's free score quota",
@@ -96,6 +109,7 @@
     },
     {
       "name": "get_api_key",
+      "title": "Mint a free API key",
       "description": "Mint one free sg_live_ key so later score_spend and get_quota calls use 1,000 scores per UTC day instead of the anonymous 100. Call once per agent when you will score often and have no stored key. Do not call every turn, do not mint again if you already stored the secret, and do not call just to read remaining scores (use get_quota). Returns the secret once as api_key, plus key_id, key_prefix, label, tier free, daily_limit, created_at, and note. Only a hash is stored, so the secret cannot be shown again. Keys do not expire and there is no revoke tool; a lost key stays valid, and an unknown or non-sg_live_ value later returns invalid_api_key. At most 20 mints per client per UTC day, then key_mint_limit and no new key. Minting is free and does not consume a score. Send the secret later as Authorization: Bearer or as api_key. label is an optional stored name and does not set a cap, a scope, or an expiry.",
       "annotations": {
         "title": "Mint a free API key",
@@ -112,6 +126,38 @@
             "description": "Optional name stored with the key, up to 80 characters. Does not set a cap or an expiry. Keys do not expire."
           }
         },
+        "additionalProperties": false
+      }
+    },
+    {
+      "name": "set_wallet_allowlist",
+      "title": "Store wallets this key may spend from",
+      "description": "Store the 0x wallets this sg_live_ key is allowed to spend from. Call it when an operator names those wallets, once, not on every spend, and not to approve a payment. score_spend still has to run before any transfer. A block or ask_human from score_spend means do not broadcast. Pass allowed_wallets. This replaces the stored list for that key in one write. An empty array stores an allowlist that authorizes no wallet, so a later score with from_wallet and no call-level list returns block, reason unauthorized_wallet. allowed_wallets is required. At most 32 addresses. A published developer test account (Hardhat/Anvil default accounts, Ganache, BIP-39 test, and other public test mnemonics) is rejected with dev_wallet and is not stored. Requires api_key, or Authorization: Bearer sg_live_. Anonymous and bundle callers cannot store a list; they can pass allowed_wallets on score_spend instead. An unrecognized key returns invalid_api_key. A missing key returns api_key_required. Does not consume a score and is never billed. Returns key_id, key_prefix, allowed_wallets, and updated_at. A new key starts with no list, which makes a later from_wallet ask_human with reason wallet_unverified until you set one. Do not put a private key or a recovery phrase in this tool. Addresses only.",
+      "annotations": {
+        "title": "Store wallets this key may spend from",
+        "readOnlyHint": false,
+        "idempotentHint": true,
+        "destructiveHint": false,
+        "openWorldHint": false
+      },
+      "inputSchema": {
+        "type": "object",
+        "properties": {
+          "allowed_wallets": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "description": "0x addresses this key may spend from. Replaces the stored list. An empty array authorizes none. Public developer test accounts are rejected and not stored."
+          },
+          "api_key": {
+            "type": "string",
+            "description": "sg_live_ key this list belongs to. You can also send Authorization: Bearer. Required. Anonymous callers cannot store a list."
+          }
+        },
+        "required": [
+          "allowed_wallets"
+        ],
         "additionalProperties": false
       }
     }

@@ -19,4 +19,4 @@ Optional: for 1,000 free scores/day instead of 100, get a free key with `curl -X
 
 Verify: call `score_spend` with `{"amount":0.2,"category":"status_check","merchant":"https://www.cloudflare.com"}`. Expect verdict `approve`.
 
-Tools: `score_spend` (approve / ask_human / block before paying), `get_quota`, `get_api_key`.
+Tools: `score_spend` (approve / ask_human / block before paying; pass `from_wallet` when the spend leaves a wallet), `get_quota`, `get_api_key`, `set_wallet_allowlist`.
