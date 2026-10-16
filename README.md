@@ -150,6 +150,17 @@ Other routes:
 - `GET /.well-known/mcp` (and `/.well-known/mcp.json`)
 - `GET /.well-known/x402`
 - `POST /mcp` streamable HTTP, protocol `2025-06-18` (also accepts `2025-03-26`)
+- `GET /v1/sources` call totals by directory tag
+
+### Source tags
+
+`?src=` on a counted route (`POST /v1/score`, `GET /v1/quota`, `POST /v1/wallet-allowlist`, and `POST /mcp` tool calls) rolls into `GET /v1/sources`. Known tags are `smithery`, `glama`, `mcpservers`, `registry`, `awesome`, `x`, `devto`, `hn`, `site`, and `direct` (no tag). Anything else is `other`.
+
+`rows` are calls per day, source, tool, and outcome (`ok`, `error`, `limit`). `callers` is per day and source: those three counts, `unique_callers`, `unique_ok` / `unique_error` / `unique_limit`, and `top_callers`. A caller is SHA-256 of the UTC day, a colon, and the API key, or `CF-Connecting-IP` when there is no key, truncated before it is stored. The response shows 8 hex characters of that hash. Raw IPs and keys are not stored. The same client is a new caller on the next UTC day. `top_callers` keeps at most 10 hashes for that day and source, so one prefix with most of the calls is visible.
+
+Unique-caller rows start at the deploy that applies `migrations/0005_source_callers.sql`. Older daily totals stay. There is no backfill.
+
+Calls whose user agent matches our probes, whose API key hash starts with a prefix in `SOURCES_EXCLUDE_KEY_HASHES`, or whose IP hash starts with a prefix in `SOURCES_EXCLUDE_IP_HASHES` are omitted. Hash the IP by itself (`printf '%s' "$IP" | sha256sum`) and store a prefix, not the address.
 
 ### MCP
 
@@ -204,7 +215,14 @@ npx wrangler secret put BUNDLE_PROXY_SECRET
 npx wrangler deploy
 ```
 
-The Pro waitlist page is [https://spendgate.toolweather.workers.dev/pro](https://spendgate.toolweather.workers.dev/pro). The signup count, with no addresses, is `GET https://spendgate.toolweather.workers.dev/v1/waitlist/count`. Apply the remote migrations before deploy so `waitlist` and `wallet_allowlist` exist. `migrations/0004_wallet_allowlist.sql` is the per-key allowlist. Do not put `PAY_TO` or `BUNDLE_PROXY_SECRET` in the repo, and do not change those secrets for this migration. Scores that omit `from_wallet` keep working before `0004` is applied. `set_wallet_allowlist` and the stored-list fallback need the new table.
+The Pro waitlist page is [https://spendgate.toolweather.workers.dev/pro](https://spendgate.toolweather.workers.dev/pro). The signup count, with no addresses, is `GET https://spendgate.toolweather.workers.dev/v1/waitlist/count`. Apply the remote migrations before deploy so `waitlist`, `wallet_allowlist`, and `source_callers` exist. `migrations/0004_wallet_allowlist.sql` is the per-key allowlist. `migrations/0005_source_callers.sql` adds unique-caller counts on `GET /v1/sources`. Counting starts at that deploy; earlier calls are not backfilled. Do not put `PAY_TO` or `BUNDLE_PROXY_SECRET` in the repo, and do not change those secrets for this migration. Scores that omit `from_wallet` keep working before `0004` is applied. `set_wallet_allowlist` and the stored-list fallback need the new table.
+
+To leave this box out of the caller counts without storing its address, set a prefix of the SHA-256 of `CF-Connecting-IP` (the IP alone, not the day):
+
+```bash
+# printf '%s' "$IP" | sha256sum   — paste a prefix only, not the IP
+npx wrangler secret put SOURCES_EXCLUDE_IP_HASHES
+```
 
 ```bash
 npx wrangler d1 migrations apply spendgate --remote

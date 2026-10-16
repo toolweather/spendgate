@@ -57,3 +57,8 @@ remote = true
 # Optional PayCheck key. Leave unset to use BUNDLE_PROXY_SECRET with
 # SpendGate's internal bundle client, or PayCheck's anonymous tier.
 #   npx wrangler secret put PAYCHECK_API_KEY
+#
+# Optional source-counter exclusions. Comma-separated SHA-256 prefixes.
+# IP hashes are of CF-Connecting-IP alone. Do not put a raw IP or key here.
+#   npx wrangler secret put SOURCES_EXCLUDE_KEY_HASHES
+#   npx wrangler secret put SOURCES_EXCLUDE_IP_HASHES
