@@ -9,7 +9,7 @@ Add this to your MCP settings (e.g. Cline `cline_mcp_settings.json`):
   "mcpServers": {
     "spendgate": {
       "type": "streamableHttp",
-      "url": "https://spendgate.toolweather.workers.dev/mcp"
+      "url": "https://spendgate.toolweather.workers.dev/mcp?src=site"
     }
   }
 }
