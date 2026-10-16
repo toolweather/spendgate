@@ -136,8 +136,11 @@ describe("HTTP API", () => {
     expect((await post(built, "/v1/score", microBody)).status).toBe(200);
     const blocked = await post(built, "/v1/score", microBody);
     expect(blocked.status).toBe(402);
-    const body = (await blocked.json()) as { error: { code: string } };
+    const body = (await blocked.json()) as { error: { code: string; message: string }; waitlist_url: string };
     expect(body.error.code).toBe("payment_not_configured");
+    expect(body.waitlist_url).toBe("http://localhost/pro");
+    expect(body.error.message).toContain("$19/mo");
+    expect(body.error.message).toContain(body.waitlist_url);
     expect(blocked.headers.get("payment-required")).toBeNull();
   });
 
@@ -166,11 +169,27 @@ describe("HTTP API", () => {
     expect(required.status).toBe(402);
     const header = required.headers.get("payment-required");
     expect(header).toBeTruthy();
-    const decoded = decodeBase64Json(header!) as { x402Version: number; accepts: Array<{ amount: string; payTo: string; network: string }> };
+    const decoded = decodeBase64Json(header!) as {
+      x402Version: number;
+      accepts: Array<{ amount: string; payTo: string; network: string }>;
+      extensions: Record<string, unknown>;
+    };
     expect(decoded.x402Version).toBe(2);
     expect(decoded.accepts[0]?.amount).toBe("1000");
     expect(decoded.accepts[0]?.payTo).toBe(PAY_TO);
     expect(decoded.accepts[0]?.network).toBe("eip155:8453");
+    expect(decoded.extensions).toEqual({});
+    expect(decoded).not.toHaveProperty("waitlist_url");
+    const requiredBody = (await required.json()) as {
+      x402Version: number;
+      accepts: unknown[];
+      extensions: Record<string, unknown>;
+      waitlist_url: string;
+    };
+    expect(requiredBody.x402Version).toBe(2);
+    expect(requiredBody.accepts).toHaveLength(1);
+    expect(requiredBody.extensions).toEqual({});
+    expect(requiredBody.waitlist_url).toBe("http://localhost/pro");
 
     const nonce = `0x${"ab".repeat(32)}`;
     const paid = await post(
@@ -247,6 +266,8 @@ describe("HTTP API", () => {
     const spec = await built.app.request("/openapi.json", {}, built.env);
     const openapi = (await spec.json()) as { paths: Record<string, unknown> };
     expect(openapi.paths["/v1/score"]).toBeTruthy();
+    expect(openapi.paths["/v1/waitlist"]).toBeTruthy();
+    expect(openapi.paths["/v1/waitlist/count"]).toBeTruthy();
   });
 
   it("returns 503 for scores when D1 is not bound", async () => {
@@ -728,7 +749,9 @@ describe("Toolweather bundle proxy headers", () => {
     expect((await post(built, "/v1/score", microBody, bundleHeaders(CLIENT_A))).status).toBe(200);
     const blocked = await post(built, "/v1/score", microBody, bundleHeaders(CLIENT_A));
     expect(blocked.status).toBe(402);
-    expect(((await blocked.json()) as { error: { code: string } }).error.code).toBe("payment_not_configured");
+    const blockedBody = (await blocked.json()) as { error: { code: string }; waitlist_url: string };
+    expect(blockedBody.error.code).toBe("payment_not_configured");
+    expect(blockedBody.waitlist_url).toBe("http://localhost/pro");
 
     const other = await post(built, "/v1/score", microBody, bundleHeaders(CLIENT_B));
     expect(other.status).toBe(200);
@@ -745,5 +768,115 @@ describe("Toolweather bundle proxy headers", () => {
     expect(secondSame.status).toBe(429);
     const otherClient = await post(built, "/v1/keys", { label: "b" }, bundleHeaders(CLIENT_B));
     expect(otherClient.status).toBe(201);
+  });
+});
+
+describe("SpendGate Pro waitlist", () => {
+  it("stores a lowercased email once and returns a public count with no addresses", async () => {
+    const built = appFor();
+    const empty = await built.app.request("/v1/waitlist/count", {}, built.env);
+    expect(empty.status).toBe(200);
+    expect(await empty.json()).toEqual({ count: 0 });
+
+    const created = await post(built, "/v1/waitlist", { email: " Team@Example.com ", source: "pro" });
+    expect(created.status).toBe(201);
+    expect(await created.json()).toEqual({ ok: true });
+
+    const again = await post(built, "/v1/waitlist", { email: "team@example.com", source: "landing" });
+    expect(again.status).toBe(200);
+    expect(await again.json()).toEqual({ ok: true });
+
+    const count = await built.app.request("/v1/waitlist/count", {}, built.env);
+    const countBody = (await count.json()) as Record<string, unknown>;
+    expect(countBody).toEqual({ count: 1 });
+    expect(JSON.stringify(countBody)).not.toContain("example.com");
+  });
+
+  it("rejects a bad email, ignores the honeypot, and caps signups per IP per day", async () => {
+    const built = appFor();
+    const bad = await post(built, "/v1/waitlist", { email: "not-an-email" });
+    expect(bad.status).toBe(400);
+    expect(((await bad.json()) as { error: { code: string } }).error.code).toBe("invalid_email");
+
+    const bot = await post(built, "/v1/waitlist", { email: "bot@example.com", hp_field: "https://spam.example" });
+    expect(bot.status).toBe(200);
+    expect(await bot.json()).toEqual({ ok: true });
+
+    for (let i = 0; i < 10; i += 1) {
+      const res = await post(built, "/v1/waitlist", { email: `person${i}@example.com`, source: "pro" });
+      expect(res.status).toBe(201);
+    }
+    const capped = await post(built, "/v1/waitlist", { email: "overflow@example.com" });
+    expect(capped.status).toBe(429);
+
+    const otherIp = await post(built, "/v1/waitlist", { email: "overflow@example.com" }, { "cf-connecting-ip": "198.51.100.20" });
+    expect(otherIp.status).toBe(201);
+
+    const counted = (await (await built.app.request("/v1/waitlist/count", {}, built.env)).json()) as { count: number };
+    expect(counted.count).toBe(11);
+  });
+
+  it("accepts a form post and returns 503 when D1 is not bound", async () => {
+    const built = appFor();
+    const form = await built.app.request(
+      "/v1/waitlist",
+      {
+        method: "POST",
+        headers: {
+          "content-type": "application/x-www-form-urlencoded",
+          "cf-connecting-ip": "203.0.113.10",
+        },
+        body: "email=ada%40team.example&source=pro&hp_field=",
+      },
+      built.env,
+    );
+    expect(form.status).toBe(201);
+
+    const app = createApp();
+    const missing = await app.request(
+      "/v1/waitlist",
+      { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ email: "ada@team.example" }) },
+      testEnv(),
+    );
+    expect(missing.status).toBe(503);
+    const count = await app.request("/v1/waitlist/count", {}, testEnv());
+    expect(count.status).toBe(503);
+  });
+
+  it("points MCP at the waitlist without putting that field in the x402 header", async () => {
+    const unpaid = appFor({ ANON_DAILY_LIMIT: "0" });
+    const blocked = await post(unpaid, "/mcp", {
+      jsonrpc: "2.0",
+      id: 9,
+      method: "tools/call",
+      params: { name: "score_spend", arguments: microBody },
+    });
+    expect(blocked.status).toBe(402);
+    const blockedBody = (await blocked.json()) as {
+      error: { code: number; message: string; data: { error: { code: string }; waitlist_url: string } };
+    };
+    expect(blockedBody.error.code).toBe(-32002);
+    expect(blockedBody.error.data.error.code).toBe("payment_not_configured");
+    expect(blockedBody.error.data.waitlist_url).toBe("http://localhost/pro");
+    expect(blockedBody.error.message).toContain(blockedBody.error.data.waitlist_url);
+
+    const paid = appFor({ ANON_DAILY_LIMIT: "0", PAY_TO });
+    const required = await post(paid, "/mcp", {
+      jsonrpc: "2.0",
+      id: 10,
+      method: "tools/call",
+      params: { name: "score_spend", arguments: microBody },
+    });
+    expect(required.status).toBe(402);
+    const header = required.headers.get("payment-required");
+    expect(header).toBeTruthy();
+    const decoded = decodeBase64Json(header!) as { x402Version: number; accepts: unknown[]; extensions: Record<string, unknown> };
+    expect(decoded.x402Version).toBe(2);
+    expect(decoded.accepts).toHaveLength(1);
+    expect(decoded.extensions).toEqual({});
+    expect(decoded).not.toHaveProperty("waitlist_url");
+    const requiredBody = (await required.json()) as { error: { data: { waitlist_url: string; x402Version: number } } };
+    expect(requiredBody.error.data.x402Version).toBe(2);
+    expect(requiredBody.error.data.waitlist_url).toBe("http://localhost/pro");
   });
 });

@@ -95,9 +95,47 @@ export function openApiDocument(origin: string, config: Config) {
             "401": { description: "API key was presented but not recognized." },
             "402": {
               description:
-                "Free cap exhausted. Body and PAYMENT-REQUIRED header carry x402 v2 payment requirements when PAY_TO is set.",
+                "Free cap exhausted. When PAY_TO is set, the JSON body and the PAYMENT-REQUIRED header carry x402 v2 payment requirements. waitlist_url is a sibling of quota on the JSON body and is not added to the PAYMENT-REQUIRED payload. When PAY_TO is unset, the body is payment_not_configured plus waitlist_url.",
             },
           },
+        },
+      },
+      "/v1/waitlist": {
+        post: {
+          operationId: "joinWaitlist",
+          summary: "Join the SpendGate Pro waitlist",
+          description:
+            "Stores one lowercased email. A duplicate email is not inserted again. No email is sent and no charge is made. A hidden hp_field that is non-empty is ignored. At most 10 signups per client per UTC day.",
+          requestBody: {
+            required: true,
+            content: {
+              "application/json": {
+                schema: {
+                  type: "object",
+                  required: ["email"],
+                  properties: {
+                    email: { type: "string", format: "email" },
+                    source: { type: "string" },
+                    hp_field: { type: "string", description: "Honeypot. Leave empty." },
+                  },
+                },
+              },
+            },
+          },
+          responses: {
+            "201": { description: "Email stored." },
+            "200": { description: "Already on the list, or a honeypot submission that was not stored." },
+            "400": { description: "Email or source was not usable." },
+            "429": { description: "This client hit the daily signup cap." },
+          },
+        },
+      },
+      "/v1/waitlist/count": {
+        get: {
+          operationId: "waitlistCount",
+          summary: "Public count of waitlist emails",
+          description: "Returns { count } and no email addresses.",
+          responses: { "200": { description: "Signup count" } },
         },
       },
       "/v1/quota": {

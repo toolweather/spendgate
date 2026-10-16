@@ -131,7 +131,53 @@ async function onSubmit(event) {
   }
 }
 
+function setWaitlistStatus(message, isError) {
+  const status = document.querySelector("#waitlist-status");
+  if (!status) return;
+  status.textContent = message;
+  status.className = isError ? "error" : "muted";
+}
+
+async function onWaitlist(event) {
+  event.preventDefault();
+  const form = event.currentTarget;
+  const button = form.querySelector("button[type='submit']");
+  const data = new FormData(form);
+  button.disabled = true;
+  const previous = button.textContent;
+  button.textContent = "Joining…";
+  try {
+    const response = await fetch("/v1/waitlist", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        email: String(data.get("email") || ""),
+        source: String(data.get("source") || "pro"),
+        hp_field: String(data.get("hp_field") || ""),
+      }),
+    });
+    const body = await response.json().catch(() => ({}));
+    if (response.status === 429) {
+      setWaitlistStatus(body.error?.message || "Too many signups from this network today.", true);
+      return;
+    }
+    if (!response.ok) {
+      setWaitlistStatus(body.error?.message || "Enter a valid email address.", true);
+      return;
+    }
+    form.email.value = "";
+    setWaitlistStatus("You're on the list. This test does not send email and does not charge you.", false);
+  } catch {
+    setWaitlistStatus("The waitlist request did not reach the API.", true);
+  } finally {
+    button.disabled = false;
+    button.textContent = previous;
+  }
+}
+
 loadPolicy();
+const waitlistForm = document.querySelector("#waitlist");
+if (waitlistForm) waitlistForm.addEventListener("submit", onWaitlist);
 const form = document.querySelector("#try");
 if (form) {
   form.addEventListener("submit", onSubmit);

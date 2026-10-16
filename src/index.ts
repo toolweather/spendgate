@@ -9,6 +9,7 @@ import { policyDocument } from "./scoring.js";
 import { mintKey, readQuota, scoreRequest, type ServiceOutcome } from "./service.js";
 import { D1UsageStore, type UsageStore } from "./store.js";
 import { paymentRequirements } from "./x402.js";
+import { submitWaitlist, waitlistCount } from "./waitlist.js";
 
 export interface AppOptions {
   store?: UsageStore;
@@ -34,6 +35,25 @@ function bundleFrom(header: (name: string) => string | undefined): { bundleSecre
     bundleSecret: header("x-tw-bundle-secret") ?? null,
     bundleClient: header("x-tw-bundle-client") ?? null,
   };
+}
+
+async function readWaitlistPayload(request: Request): Promise<{ ok: true; value: unknown } | { ok: false; message: string }> {
+  const type = request.headers.get("content-type") ?? "";
+  if (type.includes("application/x-www-form-urlencoded") || type.includes("multipart/form-data")) {
+    const length = Number(request.headers.get("content-length") ?? "0");
+    if (length > 16_384) return { ok: false, message: "Request body is limited to 16 KB." };
+    try {
+      const form = await request.formData();
+      const value: Record<string, string> = {};
+      for (const [key, entry] of form.entries()) {
+        if (typeof entry === "string") value[key] = entry;
+      }
+      return { ok: true, value };
+    } catch {
+      return { ok: false, message: "Body must be a form or JSON." };
+    }
+  }
+  return readBody(request);
 }
 
 async function readBody(request: Request): Promise<{ ok: true; value: unknown } | { ok: false; message: string }> {
@@ -222,6 +242,28 @@ export function createApp(options: AppOptions = {}) {
       ...bundleFrom((name) => c.req.header(name)),
     });
     return send(c, outcome);
+  });
+
+  app.post("/v1/waitlist", async (c) => {
+    const store = storeFor(c.env);
+    if (!store) return send(c, unavailable());
+    const body = await readWaitlistPayload(c.req.raw);
+    if (!body.ok) {
+      return c.json({ error: { code: "invalid_json", message: body.message } }, 400);
+    }
+    const outcome = await submitWaitlist({
+      store,
+      now: options.now?.() ?? new Date(),
+      ip: clientIp(c.req.raw),
+      body: body.value,
+    });
+    return send(c, outcome);
+  });
+
+  app.get("/v1/waitlist/count", async (c) => {
+    const store = storeFor(c.env);
+    if (!store) return send(c, unavailable());
+    return send(c, await waitlistCount(store));
   });
 
   app.post("/v1/score", async (c) => {
