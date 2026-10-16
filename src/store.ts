@@ -40,7 +40,13 @@ export interface UsageStore {
   insertKey(row: StoredKey): Promise<void>;
   countKeysSince(ownerHint: string, sinceIso: string): Promise<number>;
   getUsage(subject: string, day: string): Promise<UsageSnapshot>;
-  tryConsumeFree(subject: string, day: string, limit: number): Promise<boolean>;
+  /**
+   * Reserve one free score in a single write. The returned snapshot is the
+   * row this statement committed. Null means the daily limit was already
+   * reached and nothing was incremented. Callers show this snapshot;
+   * a later SELECT can be served by a replica that still has an older count.
+   */
+  tryConsumeFree(subject: string, day: string, limit: number): Promise<UsageSnapshot | null>;
   addPaid(subject: string, day: string): Promise<void>;
   getPayment(nonce: string): Promise<StoredPayment | null>;
   recordPayment(row: StoredPayment): Promise<void>;
@@ -100,13 +106,14 @@ export class MemoryUsageStore implements UsageStore {
     return this.usage.get(`${subject}|${day}`) ?? emptyUsage();
   }
 
-  async tryConsumeFree(subject: string, day: string, limit: number): Promise<boolean> {
-    if (limit <= 0) return false;
+  async tryConsumeFree(subject: string, day: string, limit: number): Promise<UsageSnapshot | null> {
+    if (limit <= 0) return null;
     const key = `${subject}|${day}`;
     const row = this.usage.get(key) ?? emptyUsage();
-    if (row.scoreCount >= limit) return false;
-    this.usage.set(key, { scoreCount: row.scoreCount + 1, paidCount: row.paidCount });
-    return true;
+    if (row.scoreCount >= limit) return null;
+    const next = { scoreCount: row.scoreCount + 1, paidCount: row.paidCount };
+    this.usage.set(key, next);
+    return { scoreCount: next.scoreCount, paidCount: next.paidCount };
   }
 
   async addPaid(subject: string, day: string): Promise<void> {
@@ -178,10 +185,17 @@ function mapKey(row: KeyRow): StoredKey {
 }
 
 export class D1UsageStore implements UsageStore {
-  constructor(private readonly db: D1Database) {}
+  private readonly sql: D1Database | D1DatabaseSession;
+
+  constructor(db: D1Database) {
+    // Anchor every statement in this request at the primary. The first query
+    // (the quota upsert, or a quota read) then cannot land on a replica that
+    // is still sitting on an older score_count.
+    this.sql = typeof db.withSession === "function" ? db.withSession("first-primary") : db;
+  }
 
   async getKeyByHash(hash: string): Promise<StoredKey | null> {
-    const row = await this.db
+    const row = await this.sql
       .prepare(
         `SELECT id, key_hash, key_prefix, label, tier, daily_limit, created_at, owner_hint
          FROM api_keys WHERE key_hash = ?`,
@@ -192,7 +206,7 @@ export class D1UsageStore implements UsageStore {
   }
 
   async insertKey(row: StoredKey): Promise<void> {
-    await this.db
+    await this.sql
       .prepare(
         `INSERT INTO api_keys (id, key_hash, key_prefix, label, tier, daily_limit, created_at, owner_hint)
          VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
@@ -202,7 +216,7 @@ export class D1UsageStore implements UsageStore {
   }
 
   async countKeysSince(ownerHint: string, sinceIso: string): Promise<number> {
-    const row = await this.db
+    const row = await this.sql
       .prepare(`SELECT COUNT(*) AS n FROM api_keys WHERE owner_hint = ? AND created_at >= ?`)
       .bind(ownerHint, sinceIso)
       .first<{ n: number }>();
@@ -210,31 +224,36 @@ export class D1UsageStore implements UsageStore {
   }
 
   async getUsage(subject: string, day: string): Promise<UsageSnapshot> {
-    const row = await this.db
+    const row = await this.sql
       .prepare(`SELECT score_count, paid_count FROM usage_daily WHERE subject = ? AND day = ?`)
       .bind(subject, day)
       .first<{ score_count: number; paid_count: number }>();
     if (!row) return emptyUsage();
-    return { scoreCount: row.score_count, paidCount: row.paid_count };
+    return { scoreCount: Number(row.score_count), paidCount: Number(row.paid_count) };
   }
 
-  async tryConsumeFree(subject: string, day: string, limit: number): Promise<boolean> {
-    if (limit <= 0) return false;
-    const result = await this.db
+  async tryConsumeFree(subject: string, day: string, limit: number): Promise<UsageSnapshot | null> {
+    if (limit <= 0) return null;
+    // One statement. RETURNING is the count this write committed. A follow-up
+    // SELECT is a different query and can be served by a replica that still
+    // has the first insert of the day (score_count = 1).
+    const row = await this.sql
       .prepare(
         `INSERT INTO usage_daily (subject, day, score_count, paid_count)
          VALUES (?, ?, 1, 0)
          ON CONFLICT (subject, day) DO UPDATE SET
-           score_count = score_count + 1
-         WHERE usage_daily.score_count < ?`,
+           score_count = usage_daily.score_count + 1
+         WHERE usage_daily.score_count < ?
+         RETURNING score_count, paid_count`,
       )
       .bind(subject, day, limit)
-      .run();
-    return (result.meta.changes ?? 0) > 0;
+      .first<{ score_count: number; paid_count: number }>();
+    if (!row) return null;
+    return { scoreCount: Number(row.score_count), paidCount: Number(row.paid_count) };
   }
 
   async addPaid(subject: string, day: string): Promise<void> {
-    await this.db
+    await this.sql
       .prepare(
         `INSERT INTO usage_daily (subject, day, score_count, paid_count)
          VALUES (?, ?, 0, 1)
@@ -246,7 +265,7 @@ export class D1UsageStore implements UsageStore {
   }
 
   async getPayment(nonce: string): Promise<StoredPayment | null> {
-    const row = await this.db
+    const row = await this.sql
       .prepare(
         `SELECT nonce, subject, payer, tx_hash, amount, response_json, created_at
          FROM payments WHERE nonce = ?`,
@@ -274,7 +293,7 @@ export class D1UsageStore implements UsageStore {
   }
 
   async recordPayment(row: StoredPayment): Promise<void> {
-    await this.db
+    await this.sql
       .prepare(
         `INSERT INTO payments (nonce, subject, payer, tx_hash, amount, response_json, created_at)
          VALUES (?, ?, ?, ?, ?, ?, ?)`,
@@ -286,7 +305,7 @@ export class D1UsageStore implements UsageStore {
   async joinWaitlist(row: WaitlistSignup): Promise<WaitlistJoinResult> {
     // One statement: the IP cap is a read inside the insert, and the email
     // primary key drops a duplicate without a second write.
-    const inserted = await this.db
+    const inserted = await this.sql
       .prepare(
         `INSERT INTO waitlist (email, created_at, source, ip_hash)
          SELECT ?, ?, ?, ?
@@ -296,7 +315,7 @@ export class D1UsageStore implements UsageStore {
       .bind(row.email, row.createdAt, row.source, row.ipHash, row.ipHash, row.ipDailyCap)
       .run();
     if ((inserted.meta.changes ?? 0) > 0) return "created";
-    const existing = await this.db
+    const existing = await this.sql
       .prepare(`SELECT 1 AS ok FROM waitlist WHERE email = ?`)
       .bind(row.email)
       .first<{ ok: number }>();
@@ -304,12 +323,12 @@ export class D1UsageStore implements UsageStore {
   }
 
   async countWaitlist(): Promise<number> {
-    const row = await this.db.prepare(`SELECT COUNT(*) AS n FROM waitlist`).first<{ n: number }>();
+    const row = await this.sql.prepare(`SELECT COUNT(*) AS n FROM waitlist`).first<{ n: number }>();
     return row?.n ?? 0;
   }
 
   async getWalletAllowlist(keyId: string): Promise<string[] | null> {
-    const row = await this.db
+    const row = await this.sql
       .prepare(`SELECT wallets_json FROM wallet_allowlist WHERE key_id = ?`)
       .bind(keyId)
       .first<{ wallets_json: string }>();
@@ -324,7 +343,7 @@ export class D1UsageStore implements UsageStore {
   }
 
   async setWalletAllowlist(keyId: string, wallets: string[], updatedAt: string): Promise<void> {
-    await this.db
+    await this.sql
       .prepare(
         `INSERT INTO wallet_allowlist (key_id, wallets_json, updated_at)
          VALUES (?, ?, ?)
