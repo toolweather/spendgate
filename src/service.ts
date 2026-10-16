@@ -2,7 +2,7 @@ import type { Config } from "./env.js";
 import { encodeBase64Json, hmacSha256Hex, randomHex, sha256Hex } from "./crypto.js";
 import { lookupPaycheck, paycheckTarget } from "./paycheck.js";
 import { APPROVE_MIN_SCORE, BUDGET_SCORE_CAP, parseSpendBody, scoreSpend, type ScoreResult } from "./scoring.js";
-import type { StoredKey, UsageStore } from "./store.js";
+import type { StoredKey, UsageSnapshot, UsageStore } from "./store.js";
 import {
   applyWalletGuard,
   decideWallet,
@@ -113,13 +113,7 @@ function quotaHeaders(quota: QuotaView): Record<string, string> {
   };
 }
 
-async function quotaFor(
-  store: UsageStore,
-  config: Config,
-  auth: AuthContext,
-  now: Date,
-): Promise<QuotaView> {
-  const usage = await store.getUsage(auth.subject, dayOf(now));
+function quotaView(config: Config, auth: AuthContext, now: Date, usage: UsageSnapshot): QuotaView {
   return {
     subject: auth.plan,
     key_id: auth.key?.id ?? null,
@@ -136,6 +130,34 @@ async function quotaFor(
     resets_at: resetsAt(now),
     paid_configured: Boolean(config.payTo),
   };
+}
+
+async function quotaFor(
+  store: UsageStore,
+  config: Config,
+  auth: AuthContext,
+  now: Date,
+): Promise<QuotaView> {
+  const usage = await store.getUsage(auth.subject, dayOf(now));
+  return quotaView(config, auth, now, usage);
+}
+
+/**
+ * The free upsert already refused this call, so the stored count is at least
+ * the limit. A replica SELECT can still report the first insert of the day.
+ */
+function quotaAtCap(quota: QuotaView, limit: number): QuotaView {
+  if (quota.used_today >= limit) return quota;
+  return { ...quota, used_today: limit, remaining_today: 0 };
+}
+
+async function exhaustedQuota(
+  store: UsageStore,
+  config: Config,
+  auth: AuthContext,
+  now: Date,
+): Promise<QuotaView> {
+  return quotaAtCap(await quotaFor(store, config, auth, now), auth.limit);
 }
 
 function quotaSlice(quota: QuotaView): ScoreResponseBody["quota"] {
@@ -473,15 +495,15 @@ export async function scoreRequest(args: {
   });
 
   const day = dayOf(args.now);
-  const reserved = await args.store.tryConsumeFree(auth.auth.subject, day, auth.auth.limit);
+  const consumed = await args.store.tryConsumeFree(auth.auth.subject, day, auth.auth.limit);
 
   let payer: string | null = null;
   let nonce: string | null = null;
   let pending: { payload: PaymentPayload; requirements: PaymentRequirements } | null = null;
 
-  if (!reserved) {
+  if (!consumed) {
     if (!args.config.payTo) {
-      const quota = await quotaFor(args.store, args.config, auth.auth, args.now);
+      const quota = await exhaustedQuota(args.store, args.config, auth.auth, args.now);
       const url = waitlistUrl(args.resourceUrl);
       return errorOutcome(
         402,
@@ -495,7 +517,7 @@ export async function scoreRequest(args: {
     const decoded = readPaymentHeader(args.paymentHeader);
     if (!decoded.ok) {
       const required = paymentRequired(args.config, args.resourceUrl, decoded.message);
-      const quota = await quotaFor(args.store, args.config, auth.auth, args.now);
+      const quota = await exhaustedQuota(args.store, args.config, auth.auth, args.now);
       return {
         status: 402,
         headers: {
@@ -521,7 +543,7 @@ export async function scoreRequest(args: {
           network: args.config.network,
           replayed: true,
         };
-        const quota = await quotaFor(args.store, args.config, auth.auth, args.now);
+        const quota = await exhaustedQuota(args.store, args.config, auth.auth, args.now);
         stored.quota = quotaSlice(quota);
         const headers = quotaHeaders(quota);
         if (existing.txHash) {
@@ -540,7 +562,7 @@ export async function scoreRequest(args: {
     const mismatch = payloadMismatch(decoded.payload, requirements);
     if (mismatch) {
       const required = paymentRequired(args.config, args.resourceUrl, mismatch);
-      const quota = await quotaFor(args.store, args.config, auth.auth, args.now);
+      const quota = await exhaustedQuota(args.store, args.config, auth.auth, args.now);
       return {
         status: 402,
         headers: { ...quotaHeaders(quota), "PAYMENT-REQUIRED": paymentRequiredHeader(required) },
@@ -551,7 +573,7 @@ export async function scoreRequest(args: {
     const verified = await verifyPayment(args.fetchImpl, args.config, decoded.payload, requirements);
     if (!verified.ok) {
       const required = paymentRequired(args.config, args.resourceUrl, verified.message);
-      const quota = await quotaFor(args.store, args.config, auth.auth, args.now);
+      const quota = await exhaustedQuota(args.store, args.config, auth.auth, args.now);
       return {
         status: verified.status === 502 ? 502 : 402,
         headers: { ...quotaHeaders(quota), "PAYMENT-REQUIRED": paymentRequiredHeader(required) },
@@ -598,7 +620,7 @@ export async function scoreRequest(args: {
     );
     if (!settled.ok) {
       const required = paymentRequired(args.config, args.resourceUrl, settled.message);
-      const quota = await quotaFor(args.store, args.config, auth.auth, args.now);
+      const quota = await exhaustedQuota(args.store, args.config, auth.auth, args.now);
       return {
         status: settled.status === 502 ? 502 : 402,
         headers: { ...quotaHeaders(quota), "PAYMENT-REQUIRED": paymentRequiredHeader(required) },
@@ -612,7 +634,9 @@ export async function scoreRequest(args: {
     payer = settlement.payer ?? payer;
   }
 
-  const quota = await quotaFor(args.store, args.config, auth.auth, args.now);
+  const quota = consumed
+    ? quotaView(args.config, auth.auth, args.now, consumed)
+    : await exhaustedQuota(args.store, args.config, auth.auth, args.now);
   if (settlement && nonce) {
     quota.paid_today += 1;
   }
